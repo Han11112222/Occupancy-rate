@@ -333,7 +333,7 @@ def cohort2025_progress(end_date, min_units=0, MAX_M=9):
     st.dataframe(out_df.style.format({c:'{:.1%}' for c in month_cols_out + ['선택일기준_누적입주율']}), use_container_width=True)
 
     if out_df['선택일기준_누적입주율'].notna().any():
-        fig, ax = plt.subplots(figsize=(11, 7))
+        fig, ax = plt.subplots(figsize=(9, 5))
         labels = [f"{n} ({h}세대)" for n, h in zip(out_df['아파트명'], out_df['세대수'])]
         ax.barh(labels, out_df['선택일기준_누적입주율'])
         ax.set_xlabel('선택일 기준 누적 입주율')
@@ -441,7 +441,7 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
         st.pyplot(fig, clear_figure=True)
 
         # 버블 산포도
-        fig2, ax2 = plt.subplots(figsize=(10, 8))
+        fig2, ax2 = plt.subplots(figsize=(8, 6))
         sc = ax2.scatter(
             worst['계획누적(선택일)'], worst['실제누적(선택일)'],
             s=worst['세대수']*0.25, c=worst['편차(pp)'], cmap='coolwarm',
@@ -481,3 +481,4 @@ if st.sidebar.button("입주율 분석 실행", type="primary"):
         underperformers_vs_plan(pd.to_datetime(end_date_in), min_units=min_units_in, MAX_M=9, top_n=15)
 else:
     st.info("좌측에서 **데이터/기간/세대수 하한**을 설정한 뒤 **입주율 분석 실행**을 눌러 주세요.")
+
