@@ -428,7 +428,7 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     # 막대 그래프
     worst = out.head(top_n)
     if not worst.empty:
-        fig, ax = plt.subplots(figsize=(12, 7))
+        fig, ax = plt.subplots(figsize=(10, 5))
         labels = [f"{n} ({h}세대)" for n, h in zip(worst['아파트명'], worst['세대수'])]
         ax.barh(labels, worst['편차(pp)'])
         ax.set_xlabel('계획 대비 편차 (퍼센트포인트, 음수=저조)')
