@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import streamlit as st
 from datetime import date
-import plotly.graph_objects as go  # ⬅️ Plotly
+import plotly.graph_objects as go  # Plotly
 
 st.set_page_config(page_title="입주율 분석", layout="wide")
 
@@ -442,14 +442,12 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
         st.info("산포도에 표시할 값이 없어(계획/실제 누적 비율 NaN).")
         return out
 
-    # 값이 0~1 범위가 아니면 %→비율로 변환
     if (scatter_df["계획누적(선택일)"].max() > 1) or (scatter_df["실제누적(선택일)"].max() > 1):
         scatter_df["계획누적(선택일)"] = scatter_df["계획누적(선택일)"] / 100.0
         scatter_df["실제누적(선택일)"] = scatter_df["실제누적(선택일)"] / 100.0
 
-    # 버블 크기 크게(지름 px)
     size_arr = scatter_df["세대수"].fillna(0).astype(float).to_numpy()
-    bubble_size = (np.sqrt(size_arr) * 6.4) + 60
+    bubble_size = (np.sqrt(size_arr) * 6.4) + 60  # px
 
     fig_p = go.Figure()
     fig_p.add_trace(go.Scatter(
@@ -478,19 +476,13 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
         customdata=np.c_[scatter_df["세대수"].astype(int)]
     ))
 
-    # y=x 기준선
-    fig_p.add_shape(
-        type="line", x0=0, y0=0, x1=1, y1=1,
-        line=dict(color="gray", dash="dash")
-    )
-
+    fig_p.add_shape(type="line", x0=0, y0=0, x1=1, y1=1, line=dict(color="gray", dash="dash"))
     fig_p.update_layout(
         title="계획 vs 실제 (버블=세대수, 색=편차)",
         xaxis=dict(title="계획 누적(비율)", range=[0, 1], tickformat=".0%"),
         yaxis=dict(title="실제 누적(비율)", range=[0, 1], tickformat=".0%"),
         margin=dict(l=40, r=30, t=60, b=40)
     )
-
     st.plotly_chart(fig_p, use_container_width=True, config={"displaylogo": False})
     return out
 
