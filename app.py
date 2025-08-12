@@ -83,7 +83,7 @@ if load_way == "Repo 내 파일 사용":
 else:
     df = load_df_from_path_or_buffer(None, uploaded_file) if uploaded_file else pd.DataFrame()
 
-# =============== 공통 유틸: 입주시작 index 계산 + 월열 정렬 ===============
+# =============== 공통 유틸 ===============
 def ensure_start_index(_df: pd.DataFrame):
     month_cols = [c for c in _df.columns if "개월" in str(c)]
 
@@ -110,6 +110,21 @@ def ensure_start_index(_df: pd.DataFrame):
         axis=1,
     )
     return month_cols
+
+# ✅ 세대수 → 산포도 버블 “면적”(pt²)로 변환 (제곱근 스케일)
+def _bubble_area_from_units(units, min_area=250, max_area=2800):
+    """
+    세대수 배열 -> Matplotlib scatter의 s(면적, pt^2)로 변환.
+    제곱근 스케일로 과도한 크기 차이를 완화하고,
+    값이 하나뿐일 때도 보기 좋은 크기를 유지.
+    """
+    v = pd.Series(units).fillna(0).astype(float).to_numpy()
+    v = np.clip(v, 0, None)
+    r = np.sqrt(v)
+    r_min, r_max = r.min(), r.max()
+    if r_max - r_min < 1e-9:
+        return np.full_like(r, (min_area + max_area) / 2.0)
+    return min_area + (r - r_min) / (r_max - r_min) * (max_area - min_area)
 
 # =============== 분석 함수들 ===============
 def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
@@ -480,8 +495,8 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     ax.autoscale_view()
     x_min, x_max = ax.get_xlim()
     span = x_max - x_min
-    pad_small = 0.015 * span + 6   # 계획 라벨 기본 간격
-    pad_large = 0.08 * span + 22   # 부족 라벨은 더 멀리
+    pad_small = 0.015 * span + 6
+    pad_large = 0.08 * span + 22
 
     for y, (a_units, p_units, lack) in enumerate(
         zip(
@@ -492,11 +507,9 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     ):
         if np.isfinite(a_units):
             ax.text(min(a_units + 0.008 * span + 3, x_max - 0.02 * span), y, f"{int(a_units)}세대", va="center")
-
         if np.isfinite(p_units):
             plan_x = min(p_units + pad_small, x_max - 0.12 * span)
             ax.text(plan_x, y, f"(계획 {int(p_units)} )", va="center", color="gray")
-
         if np.isfinite(lack) and lack > 0 and np.isfinite(p_units):
             lack_x = min(p_units + pad_large, x_max - 0.02 * span)
             if (lack_x - plan_x) < (0.05 * span):
@@ -518,17 +531,18 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
         st.info("⚠️ 산포도에 표시할 값이 없어(계획/실제 누적 비율 NaN).")
         return out
 
+    # 비율 보정(혹시 %가 들어온 경우)
     if (scatter_df["계획누적(선택일)"].max() > 1) or (scatter_df["실제누적(선택일)"].max() > 1):
         scatter_df["계획누적(선택일)"] = scatter_df["계획누적(선택일)"] / 100.0
         scatter_df["실제누적(선택일)"] = scatter_df["실제누적(선택일)"] / 100.0
 
-    size_arr = scatter_df["세대수"].fillna(0).astype(float).to_numpy()
-    bubble_size = (np.sqrt(size_arr) * 6.4) + 60  # 크게
+    # ✅ 세대수 기반 버블 면적
+    bubble_area = _bubble_area_from_units(scatter_df["세대수"], min_area=250, max_area=2800)
 
     sc = ax2.scatter(
         scatter_df["계획누적(선택일)"].to_numpy(),
         scatter_df["실제누적(선택일)"].to_numpy(),
-        s=bubble_size,
+        s=bubble_area,                     # ← 세대수에 비례
         c=scatter_df["편차(pp)"].to_numpy(),
         cmap="coolwarm",
         alpha=0.9,
