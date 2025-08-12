@@ -25,17 +25,25 @@ def set_korean_font_strict():
         if os.path.exists(path):
             try:
                 fm.fontManager.addfont(path)
+                prop = fm.FontProperties(fname=path)
+                chosen_name = prop.get_name()
+                break
             except Exception:
                 pass
-            prop = fm.FontProperties(fname=path)
-            chosen_name = prop.get_name()
-            break
     if chosen_name:
         mpl.rcParams["font.family"] = chosen_name
         mpl.rcParams["font.sans-serif"] = [chosen_name, "DejaVu Sans"]
     mpl.rcParams["axes.unicode_minus"] = False
     logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
-    warnings.filterwarnings("ignore", category="UserWarning", module="matplotlib.font_manager")
+    # 🔧 Python 3.13에서 category는 Warning subclass 여야 함
+    try:
+        warnings.filterwarnings(
+            "ignore",
+            category=UserWarning,
+            module=r"matplotlib\.font_manager",
+        )
+    except Exception:
+        pass
     return chosen_name
 
 chosen_font = set_korean_font_strict()
