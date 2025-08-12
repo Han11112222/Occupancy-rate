@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import streamlit as st
 from datetime import date
+import plotly.graph_objects as go  # ⬅️ Plotly
 
 st.set_page_config(page_title="입주율 분석", layout="wide")
 
@@ -34,7 +35,7 @@ def set_korean_font_strict():
         mpl.rcParams["font.sans-serif"] = [chosen_name, "DejaVu Sans"]
     mpl.rcParams["axes.unicode_minus"] = False
     logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
-    warnings.filterwarnings("ignore", category=UserWarning, module="matplotlib.font_manager")
+    warnings.filterwarnings("ignore", category="UserWarning", module="matplotlib.font_manager")
     return chosen_name
 
 chosen_font = set_korean_font_strict()
@@ -435,67 +436,62 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     fig.tight_layout()
     st.pyplot(fig, use_container_width=True)
 
-    # ========= 그래프 ②: 버블 산포도 (계획 vs 실제, 버블=세대수, 색=편차) [Plotly] =========
-import plotly.graph_objects as go
+    # ========= 그래프 ②: 버블 산포도 (Plotly) =========
+    scatter_df = worst.dropna(subset=["계획누적(선택일)", "실제누적(선택일)", "편차(pp)"]).copy()
+    if scatter_df.empty:
+        st.info("산포도에 표시할 값이 없어(계획/실제 누적 비율 NaN).")
+        return out
 
-scatter_df = worst.dropna(subset=['계획누적(선택일)', '실제누적(선택일)', '편차(pp)']).copy()
-if scatter_df.empty:
-    st.info("산포도에 표시할 값이 없어(계획/실제 누적 비율 NaN).")
-    return out
+    # 값이 0~1 범위가 아니면 %→비율로 변환
+    if (scatter_df["계획누적(선택일)"].max() > 1) or (scatter_df["실제누적(선택일)"].max() > 1):
+        scatter_df["계획누적(선택일)"] = scatter_df["계획누적(선택일)"] / 100.0
+        scatter_df["실제누적(선택일)"] = scatter_df["실제누적(선택일)"] / 100.0
 
-# 값이 0~1 범위가 아니면 %→비율로 변환
-if (scatter_df['계획누적(선택일)'].max() > 1) or (scatter_df['실제누적(선택일)'].max() > 1):
-    scatter_df['계획누적(선택일)'] = scatter_df['계획누적(선택일)'] / 100.0
-    scatter_df['실제누적(선택일)'] = scatter_df['실제누적(선택일)'] / 100.0
+    # 버블 크기 크게(지름 px)
+    size_arr = scatter_df["세대수"].fillna(0).astype(float).to_numpy()
+    bubble_size = (np.sqrt(size_arr) * 6.4) + 60
 
-# 버블 크기(지름, px): 이전보다 크게
-size_arr = scatter_df['세대수'].fillna(0).astype(float).to_numpy()
-bubble_size = (np.sqrt(size_arr) * 6.4) + 60   # 지름 px 스케일 (크게)
+    fig_p = go.Figure()
+    fig_p.add_trace(go.Scatter(
+        x=scatter_df["계획누적(선택일)"],
+        y=scatter_df["실제누적(선택일)"],
+        mode="markers+text",
+        text=scatter_df["아파트명"],
+        textposition="top center",
+        marker=dict(
+            size=bubble_size.tolist(),
+            color=scatter_df["편차(pp)"],
+            colorscale="RdBu",
+            reversescale=True,
+            showscale=True,
+            colorbar=dict(title="편차(pp)"),
+            line=dict(color="black", width=0.6),
+            opacity=0.9
+        ),
+        hovertemplate=(
+            "<b>%{text}</b><br>" +
+            "계획 누적: %{x:.0%}<br>" +
+            "실제 누적: %{y:.0%}<br>" +
+            "세대수: %{customdata[0]:,d}세대<br>" +
+            "편차: %{marker.color:+.1f} pp<extra></extra>"
+        ),
+        customdata=np.c_[scatter_df["세대수"].astype(int)]
+    ))
 
-fig = go.Figure()
+    # y=x 기준선
+    fig_p.add_shape(
+        type="line", x0=0, y0=0, x1=1, y1=1,
+        line=dict(color="gray", dash="dash")
+    )
 
-fig.add_trace(go.Scatter(
-    x=scatter_df['계획누적(선택일)'],
-    y=scatter_df['실제누적(선택일)'],
-    mode='markers+text',
-    text=scatter_df['아파트명'],
-    textposition='top center',
-    marker=dict(
-        size=bubble_size,                 # 지름(px)
-        color=scatter_df['편차(pp)'],
-        colorscale='RdBu',
-        reversescale=True,                # 붉은색(양수)↑ 파란색(음수)↓
-        showscale=True,
-        colorbar=dict(title='편차(pp)'),
-        line=dict(color='black', width=0.6),
-        opacity=0.9
-    ),
-    hovertemplate=(
-        "<b>%{text}</b><br>" +
-        "계획 누적: %{x:.0%}<br>" +
-        "실제 누적: %{y:.0%}<br>" +
-        "세대수: %{customdata[0]:,d}세대<br>" +
-        "편차: %{marker.color:+.1f} pp<extra></extra>"
-    ),
-    customdata=np.c_[scatter_df['세대수'].astype(int)]
-))
+    fig_p.update_layout(
+        title="계획 vs 실제 (버블=세대수, 색=편차)",
+        xaxis=dict(title="계획 누적(비율)", range=[0, 1], tickformat=".0%"),
+        yaxis=dict(title="실제 누적(비율)", range=[0, 1], tickformat=".0%"),
+        margin=dict(l=40, r=30, t=60, b=40)
+    )
 
-# y=x 기준선
-fig.add_shape(
-    type='line', x0=0, y0=0, x1=1, y1=1,
-    line=dict(color='gray', dash='dash')
-)
-
-# 축/레이아웃
-fig.update_layout(
-    title='계획 vs 실제 (버블=세대수, 색=편차)',
-    xaxis=dict(title='계획 누적(비율)', range=[0, 1], tickformat='.0%'),
-    yaxis=dict(title='실제 누적(비율)', range=[0, 1], tickformat='.0%'),
-    margin=dict(l=40, r=30, t=60, b=40)
-)
-
-st.plotly_chart(fig, use_container_width=True, config={'displaylogo': False})
-
+    st.plotly_chart(fig_p, use_container_width=True, config={"displaylogo": False})
     return out
 
 # =============== 실행 ===============
