@@ -123,7 +123,8 @@ else:
 종료일 = st.sidebar.text_input("종료일", value="2025/07/31")
 min_units = st.sidebar.number_input("세대수 하한(세대)", min_value=0, max_value=2000, step=50, value=300)
 
-run = st.sidebar.button("입주율 분석 실행")
+# 🔧 버튼은 한 번만 생성 + 고유 key
+run = st.sidebar.button("입주율 분석 실행", key="run_btn")
 
 # =============== 데이터 로드 ===============
 @st.cache_data(show_spinner=False)
@@ -628,7 +629,8 @@ st.title("입주율 분석 대시보드")
 if chosen_font:
     st.caption(f"한글 폰트 적용: {chosen_font}")
 
-if st.sidebar.button("입주율 분석 실행") or run:
+# 버튼은 여기서만 체크 (중복 생성 금지)
+if run:
     if df.empty:
         st.error("데이터를 먼저 불러와 주세요.")
     else:
@@ -639,4 +641,3 @@ if st.sidebar.button("입주율 분석 실행") or run:
         underperformers_vs_plan(종료일, min_units=min_units, MAX_M=9, top_n=15)
 else:
     st.info("왼쪽 사이드바에서 옵션을 설정하고 **입주율 분석 실행**을 눌러줘.")
-
