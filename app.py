@@ -1,7 +1,7 @@
-# app.py  ─ Streamlit 버전
+# app.py  ─ Streamlit 버전 (한글 폰트 견고화)
 
 # =============== 기본 세팅 ===============
-import os, logging, warnings
+import os, logging, warnings, shutil
 import numpy as np
 import pandas as pd
 import matplotlib as mpl
@@ -11,46 +11,105 @@ import streamlit as st
 
 st.set_page_config(page_title="입주율 분석", layout="wide")
 
-# ---- 한글 폰트 적용 (가능한 경우) ----
+# ---- 한글 폰트 적용 (강력 버전) ----
 def set_korean_font_strict():
-    # 리포에 폰트를 넣어둘 경우 먼저 탐색
-    local_font_candidates = [
+    """
+    1) 리포 동봉 폰트 우선 로드 → 2) 시스템 폰트 대체
+    3) Matplotlib 캐시 재생성
+    """
+    # Streamlit Cloud 등에서 캐시 경로 이슈 회피
+    os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
+
+    # 리포에 폰트 동봉 권장: fonts/NanumGothic-Regular.ttf
+    local_candidates = [
+        os.path.abspath("fonts/NanumGothic-Regular.ttf"),
+        os.path.abspath("fonts/NotoSansKR-Regular.otf"),
         "assets/fonts/NanumGothic.ttf",
         "assets/fonts/NotoSansKR-Regular.otf",
-        "fonts/NanumGothic.ttf",
-        "fonts/NotoSansKR-Regular.otf",
     ]
-    system_font_candidates = [
+    system_candidates = [
         "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
         "/usr/share/fonts/truetype/nanum/NanumGothicBold.ttf",
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/System/Library/Fonts/AppleSDGothicNeo.ttc",  # macOS
+        "C:/Windows/Fonts/malgun.ttf",                 # Windows
     ]
-    candidates = local_font_candidates + system_font_candidates
+    candidates = local_candidates + system_candidates
 
-    chosen_name = None
-    for path in candidates:
-        if os.path.exists(path):
+    chosen_path = None
+    for p in candidates:
+        if p and os.path.exists(p):
             try:
-                fm.fontManager.addfont(path)
+                fm.fontManager.addfont(p)
+                chosen_path = p
+                break
             except Exception:
-                pass
-            prop = fm.FontProperties(fname=path)
-            chosen_name = prop.get_name()
-            break
+                continue
 
-    if chosen_name:
-        mpl.rcParams["font.family"] = chosen_name
+    if chosen_path:
+        prop = fm.FontProperties(fname=chosen_path)
+        chosen_name = prop.get_name()
+        # 캐시 강제 재생성
+        try:
+            cache_dir = fm.get_cachedir()
+            if cache_dir and os.path.isdir(cache_dir):
+                shutil.rmtree(cache_dir, ignore_errors=True)
+            fm._load_fontmanager(try_read_cache=False)
+        except Exception:
+            pass
+
+        mpl.rcParams["font.family"] = [chosen_name, "DejaVu Sans"]
         mpl.rcParams["font.sans-serif"] = [chosen_name, "DejaVu Sans"]
+    else:
+        chosen_name = "DejaVu Sans"
+        mpl.rcParams["font.family"] = [chosen_name]
+
     mpl.rcParams["axes.unicode_minus"] = False
     logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
     warnings.filterwarnings("ignore", category=UserWarning, module="matplotlib.font_manager")
     return chosen_name
 
+def apply_korean_font(fig):
+    """
+    축/범례/테이블/컬러바에 폰트가 누락되는 경우를 figure 단위로 보정.
+    """
+    fam = mpl.rcParams.get("font.family", ["DejaVu Sans"])
+    fam = fam[0] if isinstance(fam, (list, tuple)) else fam
+    kprop = fm.FontProperties(family=fam)
+
+    for ax in fig.get_axes():
+        # 타이틀/라벨/틱
+        if ax.title: ax.title.set_fontproperties(kprop)
+        if ax.xaxis and ax.xaxis.get_label():
+            ax.xaxis.get_label().set_fontproperties(kprop)
+        if ax.yaxis and ax.yaxis.get_label():
+            ax.yaxis.get_label().set_fontproperties(kprop)
+        for lbl in ax.get_xticklabels() + ax.get_yticklabels():
+            lbl.set_fontproperties(kprop)
+        # 범례
+        leg = ax.get_legend()
+        if leg:
+            for txt in leg.get_texts():
+                txt.set_fontproperties(kprop)
+        # 테이블
+        for child in ax.get_children():
+            if hasattr(child, "get_celld"):
+                for cell in child.get_celld().values():
+                    cell._text.set_fontproperties(kprop)
+    # 컬러바
+    for child in fig.get_children():
+        if hasattr(child, "ax") and hasattr(child, "set_label"):
+            try:
+                for t in child.ax.get_yticklabels():
+                    t.set_fontproperties(kprop)
+                child.set_label(child.ax.get_ylabel(), fontproperties=kprop)
+            except Exception:
+                pass
+
 chosen_font = set_korean_font_strict()
 
-# =============== 사이드바 (스샷과 동일 구성) ===============
+# =============== 사이드바 ===============
 st.sidebar.markdown("### 데이터 / 필터")
-
 load_way = st.sidebar.radio("데이터 불러오기 방식", ["Repo 내 파일 사용", "파일 업로드"], index=0)
 
 uploaded_file = None
@@ -86,11 +145,9 @@ else:
 # =============== 공통 유틸 ===============
 def ensure_start_index(_df: pd.DataFrame):
     month_cols = [c for c in _df.columns if "개월" in str(c)]
-
     def _key(c):
         s = "".join(ch for ch in str(c) if ch.isdigit())
         return int(s) if s else 0
-
     month_cols = sorted(month_cols, key=_key)
 
     def first_valid_idx(row):
@@ -111,13 +168,8 @@ def ensure_start_index(_df: pd.DataFrame):
     )
     return month_cols
 
-# ✅ 세대수 → 산포도 버블 “면적”(pt²)로 변환 (제곱근 스케일)
+# ✅ 세대수 → 산포도 버블 면적 변환 (제곱근 스케일)
 def _bubble_area_from_units(units, min_area=250, max_area=2800):
-    """
-    세대수 배열 -> Matplotlib scatter의 s(면적, pt^2)로 변환.
-    제곱근 스케일로 과도한 크기 차이를 완화하고,
-    값이 하나뿐일 때도 보기 좋은 크기를 유지.
-    """
     v = pd.Series(units).fillna(0).astype(float).to_numpy()
     v = np.clip(v, 0, None)
     r = np.sqrt(v)
@@ -208,13 +260,11 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
             if eligible.empty:
                 rates.append(np.nan)
                 continue
-
             def cum_n(row, m=m):
                 idx = int(row["입주시작index"])
                 cols = month_cols[idx : idx + m]
                 vals = [0 if pd.isna(row.get(c)) else row.get(c) for c in cols]
                 return sum(vals)
-
             num = eligible.apply(cum_n, axis=1).sum()
             den = eligible["세대수"].sum()
             rates.append(num / den if den > 0 else np.nan)
@@ -261,6 +311,8 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
         t.set_fontsize(11)
         t.scale(1.0, 1.7)
         plt.subplots_adjust(hspace=0.28)
+
+        apply_korean_font(fig)  # ← 폰트 주입
         st.pyplot(fig, use_container_width=True)
     else:
         st.info("⚠️ 표시할 연도별 입주율 데이터가 없어.")
@@ -317,6 +369,8 @@ def recent2y_top_at_5m(end_date, top_n=10, min_units=0):
         for y, v in enumerate(top["입주율_5개월"]):
             ax.text(min(v + 0.01, 0.98), y, f"{v*100:.1f}%", va="center")
         fig.tight_layout()
+
+        apply_korean_font(fig)  # ← 폰트 주입
         st.pyplot(fig, use_container_width=True)
     return ranked
 
@@ -385,6 +439,8 @@ def cohort2025_progress(end_date, min_units=0, MAX_M=9):
             if pd.notna(v):
                 ax.text(min(v + 0.01, 0.98), y, f"{v*100:.1f}%", va="center")
         fig.tight_layout()
+
+        apply_korean_font(fig)  # ← 폰트 주입
         st.pyplot(fig, use_container_width=True)
     else:
         st.info("⚠️ 선택일 기준 누적입주율을 계산할 수 있는 단지가 없어.")
@@ -434,9 +490,7 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
             actual = cum_rate(r, m)
             plan = PLAN.get(m, np.nan)
             diff = (actual - plan) if pd.notna(actual) and pd.notna(plan) else np.nan
-        actual_list.append(actual)
-        plan_list.append(plan)
-        diff_list.append(diff)
+        actual_list.append(actual); plan_list.append(plan); diff_list.append(diff)
 
     cohort["실제누적(선택일)"] = actual_list
     cohort["계획누적(선택일)"] = plan_list
@@ -453,16 +507,9 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
 
     out = out[
         [
-            "아파트명",
-            "세대수",
-            "입주시작월",
-            "경과개월(선택일기준)",
-            "실제누적세대(선택일)",
-            "계획누적세대(선택일)",
-            "현재_부족세대",
-            "실제누적(선택일)",
-            "계획누적(선택일)",
-            "편차(pp)",
+            "아파트명","세대수","입주시작월","경과개월(선택일기준)",
+            "실제누적세대(선택일)","계획누적세대(선택일)","현재_부족세대",
+            "실제누적(선택일)","계획누적(선택일)","편차(pp)",
         ]
     ].sort_values(by="편차(pp)", ascending=True)
 
@@ -522,27 +569,26 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     ax.legend(loc="lower right", ncol=2)
     ax.grid(axis="x", alpha=0.3)
     fig.tight_layout()
+    apply_korean_font(fig)  # ← 폰트 주입
     st.pyplot(fig, use_container_width=True)
 
-    # ========= 그래프 ②: 버블 산포도 (Matplotlib) =========
+    # ========= 그래프 ②: 버블 산포도 =========
     fig2, ax2 = plt.subplots(figsize=(9, 7))
     scatter_df = worst.dropna(subset=["계획누적(선택일)", "실제누적(선택일)", "편차(pp)"]).copy()
     if scatter_df.empty:
         st.info("⚠️ 산포도에 표시할 값이 없어(계획/실제 누적 비율 NaN).")
         return out
 
-    # 비율 보정(혹시 %가 들어온 경우)
     if (scatter_df["계획누적(선택일)"].max() > 1) or (scatter_df["실제누적(선택일)"].max() > 1):
         scatter_df["계획누적(선택일)"] = scatter_df["계획누적(선택일)"] / 100.0
         scatter_df["실제누적(선택일)"] = scatter_df["실제누적(선택일)"] / 100.0
 
-    # ✅ 세대수 기반 버블 면적
     bubble_area = _bubble_area_from_units(scatter_df["세대수"], min_area=250, max_area=2800)
 
     sc = ax2.scatter(
         scatter_df["계획누적(선택일)"].to_numpy(),
         scatter_df["실제누적(선택일)"].to_numpy(),
-        s=bubble_area,                     # ← 세대수에 비례
+        s=bubble_area,
         c=scatter_df["편차(pp)"].to_numpy(),
         cmap="coolwarm",
         alpha=0.9,
@@ -573,6 +619,7 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
 
     ax2.grid(alpha=0.3)
     fig2.tight_layout()
+    apply_korean_font(fig2)  # ← 폰트 주입
     st.pyplot(fig2, use_container_width=True)
     return out
 
@@ -581,7 +628,7 @@ st.title("입주율 분석 대시보드")
 if chosen_font:
     st.caption(f"한글 폰트 적용: {chosen_font}")
 
-if run:
+if st.sidebar.button("입주율 분석 실행") or run:
     if df.empty:
         st.error("데이터를 먼저 불러와 주세요.")
     else:
@@ -591,4 +638,5 @@ if run:
         cohort2025_progress(종료일, min_units=min_units, MAX_M=9)
         underperformers_vs_plan(종료일, min_units=min_units, MAX_M=9, top_n=15)
 else:
-    st.info("왼쪽 사이드바에서 옵션을 설정하고 **입주율 분석 실행**을 눌러주세요.")
+    st.info("왼쪽 사이드바에서 옵션을 설정하고 **입주율 분석 실행**을 눌러줘.")
+
