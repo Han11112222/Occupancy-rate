@@ -1,7 +1,8 @@
-# app.py  ─ Streamlit 버전 (한글 폰트 견고화)
+# app.py  ─ Streamlit 버전 (한글 폰트 견고화 + 캐시 초기화 버튼 + 파일해시 자동 무효화)
 
 # =============== 기본 세팅 ===============
-import os, logging, warnings, shutil
+import os, logging, warnings, shutil, time, hashlib, io
+from pathlib import Path
 import numpy as np
 import pandas as pd
 import matplotlib as mpl
@@ -109,6 +110,13 @@ else:
     uploaded_file = st.sidebar.file_uploader("엑셀 파일 업로드", type=["xlsx"])
     excel_path = None
 
+# ── 캐시 초기화 버튼
+if st.sidebar.button("데이터 캐시 초기화"):
+    st.cache_data.clear()
+    st.cache_resource.clear()
+    st.toast("캐시 초기화 완료")
+    st.rerun()
+
 시작일 = st.sidebar.text_input("시작일", value="2021/01/01")
 종료일 = st.sidebar.text_input("종료일", value="2025/07/31")
 min_units = st.sidebar.number_input("세대수 하한(세대)", min_value=0, max_value=2000, step=50, value=300)
@@ -116,21 +124,53 @@ min_units = st.sidebar.number_input("세대수 하한(세대)", min_value=0, max
 run = st.sidebar.button("입주율 분석 실행", key="run_btn")
 
 # =============== 데이터 로드 ===============
+
+def file_digest_from_path(p: Path) -> str:
+    h = hashlib.md5()
+    with open(p, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest()[:10]
+
+def file_digest_from_bytes(b: bytes) -> str:
+    return hashlib.md5(b).hexdigest()[:10]
+
 @st.cache_data(show_spinner=False)
-def load_df_from_path_or_buffer(path: str | None, buffer):
-    if buffer is not None:
-        df_local = pd.read_excel(buffer, sheet_name="data")
+def load_df_from_path_or_buffer(path_str: str | None, buffer_bytes: bytes | None, digest: str):
+    """
+    digest는 캐시 키 역할. 내용은 사용하지 않음.
+    """
+    if buffer_bytes is not None:
+        bio = io.BytesIO(buffer_bytes)
+        df_local = pd.read_excel(bio, sheet_name="data")
     else:
-        if not path or not os.path.exists(path):
+        if not path_str or not os.path.exists(path_str):
             return pd.DataFrame()
-        df_local = pd.read_excel(path, sheet_name="data")
+        df_local = pd.read_excel(path_str, sheet_name="data")
     df_local["공급승인일자"] = pd.to_datetime(df_local["공급승인일자"], errors="coerce")
     return df_local
 
+# 파일 경로/업로드에 따라 digest 생성 → 캐시 자동 무효화
+data_caption = ""
 if load_way == "Repo 내 파일 사용":
-    df = load_df_from_path_or_buffer(excel_path, None)
+    p = Path(excel_path) if excel_path else None
+    if p and p.exists():
+        digest = file_digest_from_path(p)
+        df = load_df_from_path_or_buffer(str(p), None, digest)
+        mtime = time.strftime("%Y-%m-%d %H:%M", time.localtime(p.stat().st_mtime))
+        data_caption = f"📄 Source=Repo:{p.name} | ver={digest} | updated={mtime}"
+    else:
+        df = pd.DataFrame()
+        data_caption = "📄 Source=Repo: (경로 없음)"
 else:
-    df = load_df_from_path_or_buffer(None, uploaded_file) if uploaded_file else pd.DataFrame()
+    if uploaded_file:
+        b = uploaded_file.getvalue()
+        digest = file_digest_from_bytes(b)
+        df = load_df_from_path_or_buffer(None, b, digest)
+        data_caption = f"📄 Source=Upload:{uploaded_file.name} | ver={digest}"
+    else:
+        df = pd.DataFrame()
+        data_caption = "📄 Source=Upload: (파일 미선택)"
 
 # =============== 공통 유틸 ===============
 def ensure_start_index(_df: pd.DataFrame):
@@ -215,7 +255,6 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
     )
 
     st.subheader(f"✅ [{시작일:%Y-%m-%d} ~ {종료일:%Y-%m-%d}] (세대수 ≥ {min_units}) 입주현황 요약표")
-    # 🔧 마지막 열 '입주율' 퍼센트 표시
     st.dataframe(
         result_df.style.format({"입주율": "{:.1%}"}),
         use_container_width=True
@@ -615,6 +654,8 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
 st.title("입주율 분석 대시보드")
 if chosen_font:
     st.caption(f"한글 폰트 적용: {chosen_font}")
+# 현재 사용 중인 데이터 버전 표기
+st.caption(data_caption)
 
 if run:
     if df.empty:
