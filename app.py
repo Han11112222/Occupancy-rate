@@ -214,8 +214,12 @@ def _safe_ratio(num, den):
     return np.nan
 
 # -------------------- 분석 함수들 --------------------
+def _fmt_date_str(series):
+    """표시용 YYYY-MM-DD 문자열로 변환(계산용 원본은 유지)"""
+    return pd.to_datetime(series, errors="coerce").dt.strftime("%Y-%m-%d").fillna("")
+
 def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
-    """첫 번째 요약표: 날짜는 YYYY-MM-DD만 표시, 잔여세대수 추가, 연도별 누적 입주율 하단 표기"""
+    """첫 번째 요약표: 날짜 YYYY-MM-DD, 잔여세대수 추가, 연도별 누적 입주율 하단 표기"""
     시작일 = pd.to_datetime(시작일); 종료일 = pd.to_datetime(종료일)
     month_cols = ensure_start_index(df)
     mask = (
@@ -225,7 +229,6 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
     )
     base = df.loc[mask & df["입주시작index"].notna()].copy()
 
-    # 선택 종료일까지 누적 입주세대 계산
     def cum_until_end(row):
         idx = int(row["입주시작index"])
         months_elapsed = (종료일.year - row["공급승인일자"].year) * 12 + (종료일.month - row["공급승인일자"].month)
@@ -245,7 +248,6 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
     base["입주율"] = base.apply(lambda r: _safe_ratio(r["입주세대수"], r["세대수"]), axis=1)
     base["잔여세대수"] = (base["세대수"] - base["입주세대수"]).clip(lower=0)
 
-    # 다운로드용(원본 dtype 유지)
     result_df = (
         base[["아파트명", "공급승인일자", "세대수", "입주시작월",
               "입주세대수", "잔여세대수", "입주기간(개월)", "입주율"]]
@@ -254,12 +256,10 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
         .copy()
     )
 
-    # ── 표시용 DF: 날짜를 문자열로 변환해 시간 꼬리 제거 ──
+    # 표시용: 날짜 문자열화
     display_df = result_df.copy()
-    display_df["공급승인일자"] = pd.to_datetime(display_df["공급승인일자"], errors="coerce")\
-        .dt.strftime("%Y-%m-%d").fillna("")
-    display_df["입주시작월"] = pd.to_datetime(display_df["입주시작월"], errors="coerce")\
-        .dt.strftime("%Y-%m-%d").fillna("")
+    display_df["공급승인일자"] = _fmt_date_str(display_df["공급승인일자"])
+    display_df["입주시작월"]   = _fmt_date_str(display_df["입주시작월"])
 
     st.subheader(f"✅ [{시작일:%Y-%m-%d} ~ {종료일:%Y-%m-%d}] (세대수 ≥ {min_units}) 입주현황 요약표")
     st.dataframe(
@@ -280,7 +280,7 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
     csv = result_df.to_csv(index=False).encode("utf-8-sig")
     st.download_button("⬇️ 요약표 CSV 다운로드", data=csv, file_name="occupancy_summary.csv", mime="text/csv")
 
-    # ── 연도별 '가중' 누적 입주율 하단 표 ──
+    # 연도별 누적(가중) 입주율 표
     ybase = base.copy()
     ybase["입주시작연도"] = pd.to_datetime(ybase["입주시작월"]).dt.year
     yearly = (
@@ -309,7 +309,6 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
     )
     return result_df
 
-# -------------------- 나머지 시각화/분석 함수(원문 유지) --------------------
 def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
     month_cols = ensure_start_index(df)
     MAX_M = 9
@@ -403,17 +402,24 @@ def recent2y_top_at_5m(end_date, top_n=10, min_units=0):
     out_cols = ["아파트명", "세대수", "입주시작월", "입주율_3개월", "입주율_4개월", "입주율_5개월"]
     ranked = eligible[out_cols].sort_values(by="입주율_5개월", ascending=False).reset_index(drop=True)
 
+    # 표시용: 날짜 문자열화
+    disp = ranked.head(top_n).copy()
+    disp["입주시작월"] = _fmt_date_str(disp["입주시작월"])
+
     st.subheader(f"🏆 최근 2년 — 5개월차 입주율 TOP {top_n} (세대수 ≥ {min_units})")
-    st.dataframe(ranked.head(top_n).style.format(
-        {"입주율_3개월": "{:.1%}", "입주율_4개월": "{:.1%}", "입주율_5개월": "{:.1%}"}),
-        use_container_width=True)
+    st.dataframe(
+        disp.style.format({"입주율_3개월": "{:.1%}", "입주율_4개월": "{:.1%}", "입주율_5개월": "{:.1%}"}),
+        use_container_width=True
+    )
+
     if not ranked.head(top_n).empty:
         fig, ax = plt.subplots(figsize=(10, 6))
         labels = [f"{n} ({h}세대)" for n, h in zip(ranked.head(top_n)["아파트명"], ranked.head(top_n)["세대수"])]
         ax.barh(labels, ranked.head(top_n)["입주율_5개월"])
         ax.set_xlabel("입주시작 5개월차 입주율"); ax.set_title(f"최근 2년 — 5개월차 입주율 TOP (세대수 ≥ {min_units})")
         ax.invert_yaxis(); ax.set_xlim(0, 1)
-        for y, v in enumerate(ranked.head(top_n)["입주율_5개월"]): ax.text(min(v + 0.01, 0.98), y, f"{v*100:.1f}%", va="center")
+        for y, v in enumerate(ranked.head(top_n)["입주율_5개월"]):
+            ax.text(min(v + 0.01, 0.98), y, f"{v*100:.1f}%", va="center")
         fig.tight_layout(); apply_korean_font(fig); st.pyplot(fig, use_container_width=True)
     return ranked
 
@@ -443,7 +449,7 @@ def cohort2025_progress(end_date, min_units=0, MAX_M=9):
         cohort[f"입주율_{m}개월"] = cohort.apply(lambda r, m=m: cum_rate(r, m) if r["경과개월(선택일기준)"] >= m else np.nan, axis=1)
 
     def cumulative_as_of_selected(row):
-        m = int(row["경과개월(선택일기준)"]); 
+        m = int(row["경과개월(선택일기준)"])
         return np.nan if m <= 0 else row.get(f"입주율_{m}개월", np.nan)
 
     cohort["선택일기준_누적입주율"] = cohort.apply(cumulative_as_of_selected, axis=1)
@@ -452,9 +458,15 @@ def cohort2025_progress(end_date, min_units=0, MAX_M=9):
     out_cols = ["아파트명", "세대수", "입주시작월", "경과개월(선택일기준)"] + month_cols_out + ["선택일기준_누적입주율"]
     out_df = cohort[out_cols].sort_values(by="선택일기준_누적입주율", ascending=False)
 
+    # 표시용: 날짜 문자열화
+    disp = out_df.copy()
+    disp["입주시작월"] = _fmt_date_str(disp["입주시작월"])
+
     st.subheader(f"📊 2025년 입주시작 단지 — 선택일({end_date:%Y-%m-%d}) 기준 누적 입주율 (세대수 ≥ {min_units})")
-    st.dataframe(out_df.style.format({c: "{:.1%}" for c in month_cols_out + ["선택일기준_누적입주율"]}),
-                 use_container_width=True)
+    st.dataframe(
+        disp.style.format({c: "{:.1%}" for c in month_cols_out + ["선택일기준_누적입주율"]}),
+        use_container_width=True
+    )
 
     if out_df["선택일기준_누적입주율"].notna().any():
         fig, ax = plt.subplots(figsize=(10, 6))
@@ -523,34 +535,32 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
          "실제누적(선택일)","계획누적(선택일)","편차(pp)"]
     ].sort_values(by="편차(pp)", ascending=True)
 
-    st.subheader(f"🚨 계획 대비 저조 단지 (선택일 {end_date:%Y-%m-%d}, 세대수 ≥ {min_units}) — 상위 {top_n}개")
-    st.dataframe(out.head(top_n).style.format(
-        {"실제누적(선택일)": "{:.1%}", "계획누적(선택일)": "{:.1%}",
-         "실제누적세대(선택일)": "{:,.0f}", "계획누적세대(선택일)": "{:,.0f}",
-         "현재_부족세대": "{:,.0f}", "편차(pp)": "{:+.1f}"}),
-        use_container_width=True)
+    # 표시용: 날짜 문자열화
+    disp = out.head(top_n).copy()
+    disp["입주시작월"] = _fmt_date_str(disp["입주시작월"])
 
-    # 막대 비교
+    st.subheader(f"🚨 계획 대비 저조 단지 (선택일 {end_date:%Y-%m-%d}, 세대수 ≥ {min_units}) — 상위 {top_n}개")
+    st.dataframe(
+        disp.style.format(
+            {"실제누적(선택일)": "{:.1%}", "계획누적(선택일)": "{:.1%}",
+             "실제누적세대(선택일)": "{:,.0f}", "계획누적세대(선택일)": "{:,.0f}",
+             "현재_부족세대": "{:,.0f}", "편차(pp)": "{:+.1f}"}
+        ),
+        use_container_width=True
+    )
+
+    # 시각화는 원본 out 사용
     fig, ax = plt.subplots(figsize=(13, 5))
     worst = out.head(top_n).copy()
     y_labels = [f"{n} ({h}세대) · {m}개월차" for n, h, m in zip(worst["아파트명"], worst["세대수"], worst["경과개월(선택일기준)"])]
     ax.barh(y_labels, worst["계획누적세대(선택일)"], alpha=0.55, edgecolor="none", label="계획 누적 세대")
     ax.barh(y_labels, worst["실제누적세대(선택일)"], alpha=0.95, label="실제 누적 세대")
     ax.autoscale_view(); x_min, x_max = ax.get_xlim(); span = x_max - x_min
-    pad_small = 0.015 * span + 6; pad_large = 0.08 * span + 22
 
-    for y, (a_units, p_units, lack) in enumerate(
+    for y, (a_units, p_units) in enumerate(
         zip(worst["실제누적세대(선택일)"].astype(float),
-            worst["계획누적세대(선택일)"].astype(float),
-            worst["현재_부족세대"].astype(float))):
-        if np.isfinite(a_units): ax.text(min(a_units + 0.008 * span + 3, x_max - 0.02 * span), y, f"{int(a_units)}세대", va="center")
-        if np.isfinite(p_units):
-            plan_x = min(p_units + pad_small, x_max - 0.12 * span)
-            ax.text(plan_x, y, f"(계획 {int(p_units)} )", va="center", color="gray")
-        if np.isfinite(lack) and lack > 0 and np.isfinite(p_units):
-            lack_x = min(p_units + pad_large, x_max - 0.02 * span)
-            if (lack_x - plan_x) < (0.05 * span): lack_x = min(plan_x + 0.05 * span + 10, x_max - 0.02 * span)
-            ax.text(lack_x, y, f"부족 {int(lack)}세대", va="center")
+            worst["계획누적세대(선택일)"].astype(float))):
+        if np.isfinite(a_units): ax.text(min(a_units + 3, x_max*0.98), y, f"{int(a_units)}세대", va="center", fontsize=9)
 
     ax.set_xlabel("누적 세대수"); ax.set_title("계획 대비 저조 단지 — 계획 vs 실적 누적 세대수")
     ax.invert_yaxis(); ax.legend(loc="lower right", ncol=2); ax.grid(axis="x", alpha=0.3)
@@ -584,7 +594,7 @@ if run:
     if df.empty:
         st.error("데이터를 먼저 불러와 주세요.")
     else:
-        analyze_occupancy_by_period(시작일, 종료일, min_units=min_units)   # ← 수정 반영된 첫 표
+        analyze_occupancy_by_period(시작일, 종료일, min_units=min_units)   # ← 모든 표 날짜 문자열화 반영
         plot_yearly_avg_occupancy_with_plan(시작일, 종료일, min_units=min_units)
         recent2y_top_at_5m(종료일, top_n=10, min_units=min_units)
         cohort2025_progress(종료일, min_units=min_units, MAX_M=9)
