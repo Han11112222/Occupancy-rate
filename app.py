@@ -142,12 +142,11 @@ if load_way == "Repo 내 파일 사용":
     if auto_pick_latest:
         matches = sorted(glob.glob(pattern))
         if matches:
-            # 수정시각 최신 파일
             paths = sorted([Path(p) for p in matches], key=lambda p: p.stat().st_mtime, reverse=True)
             selected_path_str = str(paths[0])
             auto_hint = f"(자동선택: {Path(selected_path_str).name})"
         else:
-            selected_path_str = excel_path  # 패턴에 없으면 수동 경로로 폴백
+            selected_path_str = excel_path
             auto_hint = "(패턴 일치 없음 → 수동 경로 사용)"
     else:
         selected_path_str = excel_path
@@ -211,7 +210,6 @@ def _bubble_area_from_units(units, min_area=250, max_area=2800):
         return np.full_like(r, (min_area + max_area) / 2.0)
     return min_area + (r - r_min) / (r_max - r_min) * (max_area - min_area)
 
-# 안전 비율(0~1) 함수
 def _safe_ratio(num, den):
     if den and den > 0 and pd.notna(num):
         return float(np.clip(num / den, 0.0, 1.0))
@@ -227,10 +225,6 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
         & (df["세대수"].fillna(0) >= min_units)
     )
     base = df.loc[mask & df["입주시작index"].notna()].copy()
-
-    if base.empty:
-        st.info("표시할 단지가 없어.")
-        return pd.DataFrame()
 
     def cum_until_end(row):
         idx = int(row["입주시작index"])
@@ -250,36 +244,44 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
     )
     base["입주율"] = base.apply(lambda r: _safe_ratio(r["입주세대수"], r["세대수"]), axis=1)
 
-    # === 신규: 잔여세대수 계산 ===
+    # ── 신규: 잔여세대수 ──
     base["잔여세대수"] = (base["세대수"] - base["입주세대수"]).clip(lower=0)
 
-    # 결과 테이블(날짜에서 시간 제거)
+    # 결과(다운로드용 원본)
     result_df = (
         base[["아파트명", "공급승인일자", "세대수", "입주시작월", "입주세대수", "잔여세대수", "입주기간(개월)", "입주율"]]
         .dropna(subset=["입주세대수"])
         .sort_values(by="입주율", ascending=False)
         .copy()
     )
-    for col in ["공급승인일자", "입주시작월"]:
-        result_df[col] = pd.to_datetime(result_df[col]).dt.strftime("%Y-%m-%d")
+
+    # ── 표시용: 날짜의 시간 제거 + 퍼센트 컬럼 분리 ──
+    display_df = result_df.copy()
+    display_df["공급승인일자"] = pd.to_datetime(display_df["공급승인일자"], errors="coerce").dt.date
+    display_df["입주시작월"] = pd.to_datetime(display_df["입주시작월"], errors="coerce").dt.date
+    display_df["입주율(%)"] = (display_df["입주율"] * 100).round(1)
+    display_df.drop(columns=["입주율"], inplace=True)
 
     st.subheader(f"✅ [{시작일:%Y-%m-%d} ~ {종료일:%Y-%m-%d}] (세대수 ≥ {min_units}) 입주현황 요약표")
     st.dataframe(
-        result_df.style.format({
-            "세대수": "{:,.0f}",
-            "입주세대수": "{:,.0f}",
-            "잔여세대수": "{:,.0f}",
-            "입주기간(개월)": "{:,.0f}",
-            "입주율": "{:.1%}",
-        }),
-        use_container_width=True
+        display_df,
+        use_container_width=True,
+        column_config={
+            "공급승인일자": st.column_config.DateColumn("공급승인일자", format="YYYY-MM-DD"),
+            "입주시작월": st.column_config.DateColumn("입주시작월", format="YYYY-MM-DD"),
+            "세대수": st.column_config.NumberColumn("세대수", format="%,d"),
+            "입주세대수": st.column_config.NumberColumn("입주세대수", format="%,d"),
+            "잔여세대수": st.column_config.NumberColumn("잔여세대수", format="%,d"),
+            "입주기간(개월)": st.column_config.NumberColumn("입주기간(개월)", format="%d"),
+            "입주율(%)": st.column_config.NumberColumn("입주율(%)", format="%.1f%%"),
+        },
     )
 
-    # (신규) CSV 다운로드
+    # CSV 다운로드는 원본(result_df)로 유지
     csv = result_df.to_csv(index=False).encode("utf-8-sig")
     st.download_button("⬇️ 요약표 CSV 다운로드", data=csv, file_name="occupancy_summary.csv", mime="text/csv")
 
-    # === 신규: 연도별 '가중' 누적입주율 표 (하단) ===
+    # ── 연도별 누적(가중) 입주율 표기 ──
     ybase = base.copy()
     ybase["입주시작연도"] = pd.to_datetime(ybase["입주시작월"]).dt.year
     yearly = (
@@ -294,19 +296,24 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
     yearly["누적입주율"] = yearly.apply(lambda r: _safe_ratio(r["총입주세대수"], r["총세대수"]), axis=1)
 
     st.markdown("#### 📌 연도별 누적 입주율 (가중, 총입주세대수 ÷ 총세대수)")
+    ydisp = yearly.copy()
+    ydisp["누적입주율(%)"] = (ydisp["누적입주율"] * 100).round(1)
+    ydisp.drop(columns=["누적입주율"], inplace=True)
     st.dataframe(
-        yearly.style.format({
-            "단지수": "{:,.0f}",
-            "총세대수": "{:,.0f}",
-            "총입주세대수": "{:,.0f}",
-            "잔여세대수": "{:,.0f}",
-            "누적입주율": "{:.1%}",
-        }),
-        use_container_width=True
+        ydisp,
+        use_container_width=True,
+        column_config={
+            "입주시작연도": st.column_config.NumberColumn("입주시작연도", format="%d"),
+            "단지수": st.column_config.NumberColumn("단지수", format="%,d"),
+            "총세대수": st.column_config.NumberColumn("총세대수", format="%,d"),
+            "총입주세대수": st.column_config.NumberColumn("총입주세대수", format="%,d"),
+            "잔여세대수": st.column_config.NumberColumn("잔여세대수", format="%,d"),
+            "누적입주율(%)": st.column_config.NumberColumn("누적입주율(%)", format="%.1f%%"),
+        },
     )
-
     return result_df
 
+# ── 이하 함수들은 원본 그대로 ──
 def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
     month_cols = ensure_start_index(df)
     MAX_M = 9
@@ -527,7 +534,7 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
          "현재_부족세대": "{:,.0f}", "편차(pp)": "{:+.1f}"}),
         use_container_width=True)
 
-    # 막대 비교
+    # (그래프 생략 없이 원본 그대로)
     fig, ax = plt.subplots(figsize=(13, 5))
     worst = out.head(top_n).copy()
     y_labels = [f"{n} ({h}세대) · {m}개월차" for n, h, m in zip(worst["아파트명"], worst["세대수"], worst["경과개월(선택일기준)"])]
@@ -553,7 +560,6 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     ax.invert_yaxis(); ax.legend(loc="lower right", ncol=2); ax.grid(axis="x", alpha=0.3)
     fig.tight_layout(); apply_korean_font(fig); st.pyplot(fig, use_container_width=True)
 
-    # 산포도
     fig2, ax2 = plt.subplots(figsize=(9, 7))
     scatter_df = worst.dropna(subset=["계획누적(선택일)", "실제누적(선택일)", "편차(pp)"]).copy()
     if scatter_df.empty:
@@ -575,7 +581,7 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
 # -------------------- 실행 --------------------
 st.title("입주율 분석 대시보드")
 if chosen_font: st.caption(f"한글 폰트 적용: {chosen_font}")
-st.caption(data_caption)  # 현재 사용 중인 데이터 버전/수정시각/TTL 버킷
+st.caption(data_caption)
 
 if run:
     if df.empty:
