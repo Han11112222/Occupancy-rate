@@ -117,14 +117,12 @@ def file_digest_from_path(p: Path) -> str:
 def file_digest_from_bytes(b: bytes) -> str:
     return hashlib.md5(b).hexdigest()[:10]
 
-# (신규) TTL 버킷을 캐시 키에 포함 → 분 단위 자동 무효화
 def ttl_bucket(minutes: int) -> str:
     if not minutes or minutes <= 0: return "ttl0"
     return f"ttl{int(time.time() // (minutes * 60))}"
 
 @st.cache_data(show_spinner=False)
 def load_df_from_path_or_buffer(path_str: str | None, buffer_bytes: bytes | None, digest: str, ttl_key: str):
-    # digest/ttl_key는 캐시 키 역할(내용 사용하지 않음)
     if buffer_bytes is not None:
         bio = io.BytesIO(buffer_bytes)
         df_local = pd.read_excel(bio, sheet_name="data")
@@ -135,7 +133,6 @@ def load_df_from_path_or_buffer(path_str: str | None, buffer_bytes: bytes | None
     df_local["공급승인일자"] = pd.to_datetime(df_local["공급승인일자"], errors="coerce")
     return df_local
 
-# Repo 경로 선택 로직(자동/수동)
 selected_path_str = None
 auto_hint = ""
 if load_way == "Repo 내 파일 사용":
@@ -151,7 +148,6 @@ if load_way == "Repo 내 파일 사용":
     else:
         selected_path_str = excel_path
 
-# 파일 경로/업로드에 따라 digest 생성 → 캐시 자동 무효화
 data_caption = ""
 ttl_key = ttl_bucket(ttl_minutes)
 
@@ -243,11 +239,9 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
         axis=1
     )
     base["입주율"] = base.apply(lambda r: _safe_ratio(r["입주세대수"], r["세대수"]), axis=1)
-
-    # ── 신규: 잔여세대수 ──
     base["잔여세대수"] = (base["세대수"] - base["입주세대수"]).clip(lower=0)
 
-    # 결과(다운로드용 원본)
+    # 결과 DF (다운로드용 원본)
     result_df = (
         base[["아파트명", "공급승인일자", "세대수", "입주시작월", "입주세대수", "잔여세대수", "입주기간(개월)", "입주율"]]
         .dropna(subset=["입주세대수"])
@@ -255,65 +249,32 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
         .copy()
     )
 
-    # ── 표시용: 날짜의 시간 제거 + 퍼센트 컬럼 분리 ──
+    # === 표시용: 날짜의 시간 제거(문자열) ===
     display_df = result_df.copy()
-    display_df["공급승인일자"] = pd.to_datetime(display_df["공급승인일자"], errors="coerce").dt.date
-    display_df["입주시작월"] = pd.to_datetime(display_df["입주시작월"], errors="coerce").dt.date
-    display_df["입주율(%)"] = (display_df["입주율"] * 100).round(1)
-    display_df.drop(columns=["입주율"], inplace=True)
+    display_df["공급승인일자"] = pd.to_datetime(display_df["공급승인일자"], errors="coerce").dt.strftime("%Y-%m-%d")
+    display_df["입주시작월"] = pd.to_datetime(display_df["입주시작월"], errors="coerce").dt.strftime("%Y-%m-%d")
 
     st.subheader(f"✅ [{시작일:%Y-%m-%d} ~ {종료일:%Y-%m-%d}] (세대수 ≥ {min_units}) 입주현황 요약표")
     st.dataframe(
         display_df,
         use_container_width=True,
         column_config={
-            "공급승인일자": st.column_config.DateColumn("공급승인일자", format="YYYY-MM-DD"),
-            "입주시작월": st.column_config.DateColumn("입주시작월", format="YYYY-MM-DD"),
+            "공급승인일자": st.column_config.TextColumn("공급승인일자"),
+            "입주시작월": st.column_config.TextColumn("입주시작월"),
             "세대수": st.column_config.NumberColumn("세대수", format="%,d"),
             "입주세대수": st.column_config.NumberColumn("입주세대수", format="%,d"),
             "잔여세대수": st.column_config.NumberColumn("잔여세대수", format="%,d"),
             "입주기간(개월)": st.column_config.NumberColumn("입주기간(개월)", format="%d"),
-            "입주율(%)": st.column_config.NumberColumn("입주율(%)", format="%.1f%%"),
+            "입주율": st.column_config.NumberColumn("입주율", format="%.1f%%"),
         },
     )
 
-    # CSV 다운로드는 원본(result_df)로 유지
+    # CSV 다운로드(원본 컬럼 유지)
     csv = result_df.to_csv(index=False).encode("utf-8-sig")
     st.download_button("⬇️ 요약표 CSV 다운로드", data=csv, file_name="occupancy_summary.csv", mime="text/csv")
-
-    # ── 연도별 누적(가중) 입주율 표기 ──
-    ybase = base.copy()
-    ybase["입주시작연도"] = pd.to_datetime(ybase["입주시작월"]).dt.year
-    yearly = (
-        ybase.groupby("입주시작연도")
-        .agg(단지수=("아파트명", "count"),
-             총세대수=("세대수", "sum"),
-             총입주세대수=("입주세대수", "sum"))
-        .reset_index()
-        .sort_values("입주시작연도")
-    )
-    yearly["잔여세대수"] = (yearly["총세대수"] - yearly["총입주세대수"]).clip(lower=0)
-    yearly["누적입주율"] = yearly.apply(lambda r: _safe_ratio(r["총입주세대수"], r["총세대수"]), axis=1)
-
-    st.markdown("#### 📌 연도별 누적 입주율 (가중, 총입주세대수 ÷ 총세대수)")
-    ydisp = yearly.copy()
-    ydisp["누적입주율(%)"] = (ydisp["누적입주율"] * 100).round(1)
-    ydisp.drop(columns=["누적입주율"], inplace=True)
-    st.dataframe(
-        ydisp,
-        use_container_width=True,
-        column_config={
-            "입주시작연도": st.column_config.NumberColumn("입주시작연도", format="%d"),
-            "단지수": st.column_config.NumberColumn("단지수", format="%,d"),
-            "총세대수": st.column_config.NumberColumn("총세대수", format="%,d"),
-            "총입주세대수": st.column_config.NumberColumn("총입주세대수", format="%,d"),
-            "잔여세대수": st.column_config.NumberColumn("잔여세대수", format="%,d"),
-            "누적입주율(%)": st.column_config.NumberColumn("누적입주율(%)", format="%.1f%%"),
-        },
-    )
     return result_df
 
-# ── 이하 함수들은 원본 그대로 ──
+# -------------------- (이하 원래 함수들 그대로) --------------------
 def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
     month_cols = ensure_start_index(df)
     MAX_M = 9
@@ -534,7 +495,7 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
          "현재_부족세대": "{:,.0f}", "편차(pp)": "{:+.1f}"}),
         use_container_width=True)
 
-    # (그래프 생략 없이 원본 그대로)
+    # 그래프/산포도 생략 없이 원본 유지
     fig, ax = plt.subplots(figsize=(13, 5))
     worst = out.head(top_n).copy()
     y_labels = [f"{n} ({h}세대) · {m}개월차" for n, h, m in zip(worst["아파트명"], worst["세대수"], worst["경과개월(선택일기준)"])]
