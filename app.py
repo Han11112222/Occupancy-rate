@@ -11,6 +11,17 @@ import streamlit as st
 
 st.set_page_config(page_title="입주율 분석", layout="wide")
 
+# -------------------- 코드 버전(파일 해시) --------------------
+def _code_digest() -> str:
+    try:
+        p = Path(__file__)
+        return hashlib.md5(p.read_bytes()).hexdigest()[:10]
+    except Exception:
+        # Streamlit Cloud 등에서 __file__ 접근 실패 시 시간 버킷으로 대체
+        return time.strftime("ts%Y%m%d%H%M%S", time.localtime())
+
+CODE_VER = _code_digest()
+
 # -------------------- 한글 폰트 적용(강력) --------------------
 def set_korean_font_strict():
     os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
@@ -265,10 +276,13 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
         .copy()
     )
 
-    # 표시용: 날짜 문자열화
+    # 표시용: 날짜 문자열화 + 정수화 + 퍼센트 문자열화
     display_df = result_df.copy()
     display_df["공급승인일자"] = _fmt_date_str(display_df["공급승인일자"])
     display_df["입주시작월"]   = _fmt_date_str(display_df["입주시작월"])
+    for c in ["세대수", "입주세대수", "잔여세대수", "입주기간(개월)"]:
+        if c in display_df.columns:
+            display_df[c] = pd.to_numeric(display_df[c], errors="coerce").round().astype("Int64")
     display_df = _format_pct_cols(display_df, ["입주율"])
 
     st.subheader(f"✅ [{시작일:%Y-%m-%d} ~ {종료일:%Y-%m-%d}] (세대수 ≥ {min_units}) 입주현황 요약표")
@@ -305,6 +319,8 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
     yearly["누적입주율"] = yearly.apply(lambda r: _safe_ratio(r["총입주세대수"], r["총세대수"]), axis=1)
 
     yearly_disp = yearly.copy()
+    for c in ["단지수","총세대수","총입주세대수","잔여세대수","입주시작연도"]:
+        yearly_disp[c] = pd.to_numeric(yearly_disp[c], errors="coerce").round().astype("Int64")
     yearly_disp = _format_pct_cols(yearly_disp, ["누적입주율"])
 
     st.markdown("#### 📌 연도별 누적 입주율 (가중: 총입주세대수 ÷ 총세대수)")
@@ -615,13 +631,14 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
 # -------------------- 실행 --------------------
 st.title("입주율 분석 대시보드")
 if chosen_font: st.caption(f"한글 폰트 적용: {chosen_font}")
-st.caption(data_caption)  # 현재 사용 중인 데이터 버전/수정시각/TTL 버킷
+# 코드 버전(code_ver)도 함께 표기 → 이 값이 바뀌면 코드가 실제로 갱신된 것
+st.caption(f"{data_caption} | code_ver={CODE_VER}")
 
 if run:
     if df.empty:
         st.error("데이터를 먼저 불러와 주세요.")
     else:
-        analyze_occupancy_by_period(시작일, 종료일, min_units=min_units)   # ← 모든 표 날짜 문자열화 반영
+        analyze_occupancy_by_period(시작일, 종료일, min_units=min_units)   # ← 날짜 문자열화/정수화 반영
         plot_yearly_avg_occupancy_with_plan(시작일, 종료일, min_units=min_units)
         recent2y_top_at_5m(종료일, top_n=10, min_units=min_units)
         cohort2025_progress(종료일, min_units=min_units, MAX_M=9)
