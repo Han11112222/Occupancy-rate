@@ -228,6 +228,10 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
     )
     base = df.loc[mask & df["입주시작index"].notna()].copy()
 
+    if base.empty:
+        st.info("표시할 단지가 없어.")
+        return pd.DataFrame()
+
     def cum_until_end(row):
         idx = int(row["입주시작index"])
         months_elapsed = (종료일.year - row["공급승인일자"].year) * 12 + (종료일.month - row["공급승인일자"].month)
@@ -244,20 +248,63 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
         ) - int(r["입주시작index"]) + 1) if pd.notna(r["입주시작index"]) else np.nan,
         axis=1
     )
-    base["입주율"] = base.apply(lambda r: _safe_ratio(r["입주세대수"], r["세대수"]), axis=1)  # 0~100% 보장
+    base["입주율"] = base.apply(lambda r: _safe_ratio(r["입주세대수"], r["세대수"]), axis=1)
 
+    # === 신규: 잔여세대수 계산 ===
+    base["잔여세대수"] = (base["세대수"] - base["입주세대수"]).clip(lower=0)
+
+    # 결과 테이블(날짜에서 시간 제거)
     result_df = (
-        base[["아파트명", "공급승인일자", "세대수", "입주시작월", "입주세대수", "입주기간(개월)", "입주율"]]
+        base[["아파트명", "공급승인일자", "세대수", "입주시작월", "입주세대수", "잔여세대수", "입주기간(개월)", "입주율"]]
         .dropna(subset=["입주세대수"])
         .sort_values(by="입주율", ascending=False)
+        .copy()
     )
+    for col in ["공급승인일자", "입주시작월"]:
+        result_df[col] = pd.to_datetime(result_df[col]).dt.strftime("%Y-%m-%d")
 
     st.subheader(f"✅ [{시작일:%Y-%m-%d} ~ {종료일:%Y-%m-%d}] (세대수 ≥ {min_units}) 입주현황 요약표")
-    st.dataframe(result_df.style.format({"입주율": "{:.1%}"}), use_container_width=True)
+    st.dataframe(
+        result_df.style.format({
+            "세대수": "{:,.0f}",
+            "입주세대수": "{:,.0f}",
+            "잔여세대수": "{:,.0f}",
+            "입주기간(개월)": "{:,.0f}",
+            "입주율": "{:.1%}",
+        }),
+        use_container_width=True
+    )
 
     # (신규) CSV 다운로드
     csv = result_df.to_csv(index=False).encode("utf-8-sig")
     st.download_button("⬇️ 요약표 CSV 다운로드", data=csv, file_name="occupancy_summary.csv", mime="text/csv")
+
+    # === 신규: 연도별 '가중' 누적입주율 표 (하단) ===
+    ybase = base.copy()
+    ybase["입주시작연도"] = pd.to_datetime(ybase["입주시작월"]).dt.year
+    yearly = (
+        ybase.groupby("입주시작연도")
+        .agg(단지수=("아파트명", "count"),
+             총세대수=("세대수", "sum"),
+             총입주세대수=("입주세대수", "sum"))
+        .reset_index()
+        .sort_values("입주시작연도")
+    )
+    yearly["잔여세대수"] = (yearly["총세대수"] - yearly["총입주세대수"]).clip(lower=0)
+    yearly["누적입주율"] = yearly.apply(lambda r: _safe_ratio(r["총입주세대수"], r["총세대수"]), axis=1)
+
+    st.markdown("#### 📌 연도별 누적 입주율 (가중, 총입주세대수 ÷ 총세대수)")
+    st.dataframe(
+        yearly.style.format({
+            "단지수": "{:,.0f}",
+            "총세대수": "{:,.0f}",
+            "총입주세대수": "{:,.0f}",
+            "잔여세대수": "{:,.0f}",
+            "누적입주율": "{:.1%}",
+        }),
+        use_container_width=True
+    )
+
     return result_df
 
 def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
@@ -299,7 +346,7 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
 
     PLAN = {1: 9.29, 2: 43.25, 3: 62.75, 4: 72.61, 5: 78.17, 6: 81.56, 7: 84.28, 8: 86.07, 9: 87.86}
     plan_x = list(range(1, MAX_M + 1))
-    plan_y = [min(1.0, PLAN[i] / 100) for i in plan_x]  # 안전상 0~1
+    plan_y = [min(1.0, PLAN[i] / 100) for i in plan_x]
     ax_plot.plot(plan_x, plan_y, linestyle="--", marker="x", label="사업계획 기준")
 
     idx_names = [f"{i}개월" for i in plan_x]
