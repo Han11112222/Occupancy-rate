@@ -1,5 +1,6 @@
 # app.py  ─ Streamlit 버전 (한글 폰트 견고화 + 캐시 초기화 버튼 + 파일해시 자동 무효화
-#                                 + 최신 파일 자동 선택 + TTL 캐시 + 0~100% 클램프 + CSV 다운로드)
+#                                 + 최신 파일 자동 선택 + TTL 캐시 + 0~100% 클램프 + CSV 다운로드
+#                                 + 표 숫자 가운데 정렬 + 그래프 라벨(현재/계획/부족))
 import os, logging, warnings, shutil, time, hashlib, io, glob
 from pathlib import Path
 import numpy as np
@@ -17,7 +18,6 @@ def _code_digest() -> str:
         p = Path(__file__)
         return hashlib.md5(p.read_bytes()).hexdigest()[:10]
     except Exception:
-        # Streamlit Cloud 등에서 __file__ 접근 실패 시 시간 버킷으로 대체
         return time.strftime("ts%Y%m%d%H%M%S", time.localtime())
 
 CODE_VER = _code_digest()
@@ -87,12 +87,27 @@ def apply_korean_font(fig):
 
 chosen_font = set_korean_font_strict()
 
+# -------------------- 표 가운데 정렬(CSS) --------------------
+def inject_centered_style():
+    st.markdown(
+        """
+        <style>
+        /* 모든 DataFrame/Editor 셀과 헤더 중앙 정렬 */
+        [data-testid="stDataFrame"] table td, 
+        [data-testid="stDataFrame"] table th { text-align: center !important; }
+        [data-testid="stDataFrame"] table td div, 
+        [data-testid="stDataFrame"] table th div { justify-content: center !important; }
+        /* 정렬 아이콘 포함 헤더도 중앙 */
+        [data-testid="stDataFrame"] thead tr th div[role="button"] { justify-content: center !important; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+inject_centered_style()
+
 # -------------------- 사이드바 --------------------
 st.sidebar.markdown("### 데이터 / 필터")
-
 load_way = st.sidebar.radio("데이터 불러오기 방식", ["Repo 내 파일 사용", "파일 업로드"], index=0)
-
-# 자동 최신 파일 선택
 auto_pick_latest = st.sidebar.checkbox("최신 파일 자동 선택(패턴)", value=True)
 pattern = st.sidebar.text_input("패턴(자동 선택)", value="data/입주율*.xlsx")
 
@@ -110,9 +125,7 @@ if st.sidebar.button("데이터 캐시 초기화"):
     st.toast("캐시 초기화 완료")
     st.rerun()
 
-# TTL 자동 갱신
 ttl_minutes = st.sidebar.number_input("자동 갱신 주기(TTL, 분)", min_value=0, max_value=120, value=0, step=5)
-
 시작일 = st.sidebar.text_input("시작일", value="2021/01/01")
 종료일 = st.sidebar.text_input("종료일", value="2025/08/31")
 min_units = st.sidebar.number_input("세대수 하한(세대)", min_value=0, max_value=2000, step=50, value=300)
@@ -122,14 +135,16 @@ run = st.sidebar.button("입주율 분석 실행", key="run_btn")
 def file_digest_from_path(p: Path) -> str:
     h = hashlib.md5()
     with open(p, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""): h.update(chunk)
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
     return h.hexdigest()[:10]
 
 def file_digest_from_bytes(b: bytes) -> str:
     return hashlib.md5(b).hexdigest()[:10]
 
 def ttl_bucket(minutes: int) -> str:
-    if not minutes or minutes <= 0: return "ttl0"
+    if not minutes or minutes <= 0:
+        return "ttl0"
     return f"ttl{int(time.time() // (minutes * 60))}"
 
 @st.cache_data(show_spinner=False)
@@ -144,7 +159,6 @@ def load_df_from_path_or_buffer(path_str: str | None, buffer_bytes: bytes | None
     df_local["공급승인일자"] = pd.to_datetime(df_local["공급승인일자"], errors="coerce")
     return df_local
 
-# Repo 경로 선택(자동/수동)
 selected_path_str = None
 auto_hint = ""
 if load_way == "Repo 내 파일 사용":
@@ -160,7 +174,6 @@ if load_way == "Repo 내 파일 사용":
     else:
         selected_path_str = excel_path
 
-# 파일 경로/업로드에 따라 digest 생성 → 캐시 자동 무효화
 data_caption = ""
 ttl_key = ttl_bucket(ttl_minutes)
 
@@ -226,11 +239,9 @@ def _safe_ratio(num, den):
 
 # -------------------- 표시 유틸 --------------------
 def _fmt_date_str(series):
-    """표시용 YYYY-MM-DD 문자열로 변환(계산용 원본은 유지)"""
     return pd.to_datetime(series, errors="coerce").dt.strftime("%Y-%m-%d").fillna("")
 
 def _format_pct_cols(df_in, cols):
-    """0~1 비율을 'xx.x%' 문자열로 변환"""
     df = df_in.copy()
     for c in cols:
         if c in df.columns:
@@ -239,7 +250,6 @@ def _format_pct_cols(df_in, cols):
 
 # -------------------- 분석 함수들 --------------------
 def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
-    """첫 번째 요약표: 날짜 YYYY-MM-DD, 잔여세대수 추가, 연도별 누적 입주율 하단 표기"""
     시작일 = pd.to_datetime(시작일); 종료일 = pd.to_datetime(종료일)
     month_cols = ensure_start_index(df)
     mask = (
@@ -276,7 +286,7 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
         .copy()
     )
 
-    # 표시용: 날짜 문자열화 + 정수화 + 퍼센트 문자열화
+    # 표시용: 날짜/정수/퍼센트
     display_df = result_df.copy()
     display_df["공급승인일자"] = _fmt_date_str(display_df["공급승인일자"])
     display_df["입주시작월"]   = _fmt_date_str(display_df["입주시작월"])
@@ -300,11 +310,10 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
         },
     )
 
-    # CSV 다운로드(원본 유지)
     csv = result_df.to_csv(index=False).encode("utf-8-sig")
     st.download_button("⬇️ 요약표 CSV 다운로드", data=csv, file_name="occupancy_summary.csv", mime="text/csv")
 
-    # 연도별 누적(가중) 입주율 표
+    # 연도별 누적 입주율 표
     ybase = base.copy()
     ybase["입주시작연도"] = pd.to_datetime(ybase["입주시작월"]).dt.year
     yearly = (
@@ -431,7 +440,6 @@ def recent2y_top_at_5m(end_date, top_n=10, min_units=0):
     out_cols = ["아파트명", "세대수", "입주시작월", "입주율_3개월", "입주율_4개월", "입주율_5개월"]
     ranked = eligible[out_cols].sort_values(by="입주율_5개월", ascending=False).reset_index(drop=True)
 
-    # 표시용: 날짜 문자열화 + 퍼센트 문자열화
     disp = ranked.head(top_n).copy()
     disp["입주시작월"] = _fmt_date_str(disp["입주시작월"])
     disp = _format_pct_cols(disp, ["입주율_3개월", "입주율_4개월", "입주율_5개월"])
@@ -494,7 +502,6 @@ def cohort2025_progress(end_date, min_units=0, MAX_M=9):
     out_cols = ["아파트명", "세대수", "입주시작월", "경과개월(선택일기준)"] + month_cols_out + ["선택일기준_누적입주율"]
     out_df = cohort[out_cols].sort_values(by="선택일기준_누적입주율", ascending=False)
 
-    # 표시용: 날짜 문자열화 + 퍼센트 문자열화
     disp = out_df.copy()
     disp["입주시작월"] = _fmt_date_str(disp["입주시작월"])
     disp = _format_pct_cols(disp, month_cols_out + ["선택일기준_누적입주율"])
@@ -524,6 +531,7 @@ def cohort2025_progress(end_date, min_units=0, MAX_M=9):
     return out_df
 
 def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
+    """요청 반영: 막대 위에 '현재 X세대 / (계획 Y) / 부족 Z세대' 라벨 추가 + 표 중앙정렬은 전역 CSS로 처리"""
     end_date = pd.to_datetime(end_date); month_cols = ensure_start_index(df)
     cohort = df[
         (df["입주시작월"].dt.year == 2025)
@@ -577,7 +585,7 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
          "실제누적(선택일)","계획누적(선택일)","편차(pp)"]
     ].sort_values(by="편차(pp)", ascending=True)
 
-    # 표시용: 날짜 문자열화 + 퍼센트 문자열화
+    # 표시용
     disp = out.head(top_n).copy()
     disp["입주시작월"] = _fmt_date_str(disp["입주시작월"])
     disp = _format_pct_cols(disp, ["실제누적(선택일)", "계획누적(선택일)"])
@@ -598,18 +606,45 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
         },
     )
 
-    # 시각화(원본 out 사용)
+    # ── 시각화: '현재 X세대 / (계획 Y) / 부족 Z세대' 라벨 ──
     fig, ax = plt.subplots(figsize=(13, 5))
     worst = out.head(top_n).copy()
     y_labels = [f"{n} ({h}세대) · {m}개월차" for n, h, m in zip(worst["아파트명"], worst["세대수"], worst["경과개월(선택일기준)"])]
+    # 바 그리기(계획을 먼저, 실제를 위에)
     ax.barh(y_labels, worst["계획누적세대(선택일)"], alpha=0.55, edgecolor="none", label="계획 누적 세대")
     ax.barh(y_labels, worst["실제누적세대(선택일)"], alpha=0.95, label="실제 누적 세대")
-    ax.autoscale_view()
+
+    # x축 범위 (계획 최대치보다 12% 여유)
+    x_max = max(
+        worst["계획누적세대(선택일)"].max(skipna=True),
+        worst["실제누적세대(선택일)"].max(skipna=True),
+    )
+    ax.set_xlim(0, float(x_max) * 1.12)
+
+    # 라벨 배치
+    pad_in = max(5, x_max * 0.01)     # 바 안쪽 패딩
+    pad_out = max(8, x_max * 0.015)   # 바 바깥 패딩
+    for y, (a, p, lack) in enumerate(zip(
+        worst["실제누적세대(선택일)"].fillna(0),
+        worst["계획누적세대(선택일)"].fillna(0),
+        worst["현재_부족세대"].fillna(0),
+    )):
+        a = int(a); p = int(p); lack = int(lack)
+        # 현재: 실제 막대 끝 안쪽(오른쪽 끝에서 약간 왼쪽)
+        if a > 0:
+            ax.text(a - pad_in, y, f"{a:,}세대", va="center", ha="right")
+        # 계획: 계획 막대 끝 바깥(회색)
+        ax.text(p + pad_out, y, f"(계획 {p:,})", va="center", ha="left", color="gray", alpha=0.9)
+        # 부족: 실제-계획 사이 중앙(빨강, 볼드) — 부족이 있을 때만
+        if p > a:
+            mid = a + (p - a) / 2
+            ax.text(mid, y, f"부족 {lack:,}세대", va="center", ha="center", color="crimson", fontweight="bold", alpha=0.95)
+
     ax.set_xlabel("누적 세대수"); ax.set_title("계획 대비 저조 단지 — 계획 vs 실적 누적 세대수")
     ax.invert_yaxis(); ax.legend(loc="lower right", ncol=2); ax.grid(axis="x", alpha=0.3)
     fig.tight_layout(); apply_korean_font(fig); st.pyplot(fig, use_container_width=True)
 
-    # 산포도
+    # 산포도(동일)
     fig2, ax2 = plt.subplots(figsize=(9, 7))
     scatter_df = worst.dropna(subset=["계획누적(선택일)", "실제누적(선택일)", "편차(pp)"]).copy()
     if scatter_df.empty:
@@ -631,14 +666,13 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
 # -------------------- 실행 --------------------
 st.title("입주율 분석 대시보드")
 if chosen_font: st.caption(f"한글 폰트 적용: {chosen_font}")
-# 코드 버전(code_ver)도 함께 표기 → 이 값이 바뀌면 코드가 실제로 갱신된 것
 st.caption(f"{data_caption} | code_ver={CODE_VER}")
 
 if run:
     if df.empty:
         st.error("데이터를 먼저 불러와 주세요.")
     else:
-        analyze_occupancy_by_period(시작일, 종료일, min_units=min_units)   # ← 날짜 문자열화/정수화 반영
+        analyze_occupancy_by_period(시작일, 종료일, min_units=min_units)
         plot_yearly_avg_occupancy_with_plan(시작일, 종료일, min_units=min_units)
         recent2y_top_at_5m(종료일, top_n=10, min_units=min_units)
         cohort2025_progress(종료일, min_units=min_units, MAX_M=9)
