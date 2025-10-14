@@ -122,10 +122,8 @@ if st.sidebar.button("데이터 캐시 초기화"):
     st.rerun()
 
 ttl_minutes = st.sidebar.number_input("자동 갱신 주기(TTL, 분)", min_value=0, max_value=120, value=0, step=5)
-시작일 = st.sidebar.text_input("시작일", value="2021/01/01")
-종료일 = st.sidebar.text_input("종료일", value="2025/08/31")
-min_units = st.sidebar.number_input("세대수 하한(세대)", min_value=0, max_value=2000, step=50, value=300)
-run = st.sidebar.button("입주율 분석 실행", key="run_btn")
+
+# (기존: 시작일/종료일 텍스트 입력 제거)
 
 # -------------------- 데이터 로드 --------------------
 def file_digest_from_path(p: Path) -> str:
@@ -242,6 +240,47 @@ def _format_pct_cols(df_in, cols):
         if c in df.columns:
             df[c] = df[c].apply(lambda x: "" if pd.isna(x) else f"{x*100:.1f}%")
     return df
+
+# -------------------- 날짜 입력(달력) : 최신 파일의 '가장 최근 월' 말일을 종료일 기본값으로 --------------------
+def _latest_month_end_from_df(_df: pd.DataFrame) -> pd.Timestamp | None:
+    if _df is None or _df.empty:
+        return None
+    # 입주시작월 생성 보장
+    try:
+        ensure_start_index(_df)
+    except Exception:
+        pass
+    cand = None
+    if "입주시작월" in _df.columns:
+        s = pd.to_datetime(_df["입주시작월"], errors="coerce").dropna()
+        if not s.empty:
+            cand = s.max()
+    if cand is None or pd.isna(cand):
+        if "공급승인일자" in _df.columns:
+            s2 = pd.to_datetime(_df["공급승인일자"], errors="coerce").dropna()
+            if not s2.empty:
+                cand = s2.max()
+    if cand is None or pd.isna(cand):
+        return None
+    return cand.to_period("M").to_timestamp("M")
+
+if df is not None and not df.empty:
+    _latest_end_ts = _latest_month_end_from_df(df)
+else:
+    _latest_end_ts = None
+
+_default_start = pd.Timestamp("2021-01-01").date()
+_default_end = (_latest_end_ts.to_pydatetime().date()
+                if _latest_end_ts is not None
+                else pd.Timestamp("2025-08-31").date())
+
+# 달력 위젯으로 입력(단일 날짜)
+시작일 = st.sidebar.date_input("시작일", value=_default_start)
+종료일 = st.sidebar.date_input("종료일", value=_default_end)
+
+# 나머지 사이드바 입력 유지
+min_units = st.sidebar.number_input("세대수 하한(세대)", min_value=0, max_value=2000, step=50, value=300)
+run = st.sidebar.button("입주율 분석 실행", key="run_btn")
 
 # -------------------- 분석/시각화 --------------------
 def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
