@@ -123,8 +123,6 @@ if st.sidebar.button("데이터 캐시 초기화"):
 
 ttl_minutes = st.sidebar.number_input("자동 갱신 주기(TTL, 분)", min_value=0, max_value=120, value=0, step=5)
 
-# (기존: 시작일/종료일 텍스트 입력 제거)
-
 # -------------------- 데이터 로드 --------------------
 def file_digest_from_path(p: Path) -> str:
     h = hashlib.md5()
@@ -241,44 +239,51 @@ def _format_pct_cols(df_in, cols):
             df[c] = df[c].apply(lambda x: "" if pd.isna(x) else f"{x*100:.1f}%")
     return df
 
-# -------------------- 날짜 입력(달력) : 최신 파일의 '가장 최근 월' 말일을 종료일 기본값으로 --------------------
-def _latest_month_end_from_df(_df: pd.DataFrame) -> pd.Timestamp | None:
+# -------------------- 종료일 디폴트: 엑셀 내 '마지막 날짜값' --------------------
+def _last_data_date_from_df(_df: pd.DataFrame) -> pd.Timestamp | None:
+    """열 이름에 데이터/기준/마감/컷오프/집계/최종/마지막 등이 포함된 날짜열을 우선 탐색.
+    없으면 전체 열을 날짜로 파싱 가능한 값만 모아 최댓값을 반환."""
     if _df is None or _df.empty:
         return None
-    # 입주시작월 생성 보장
-    try:
-        ensure_start_index(_df)
-    except Exception:
-        pass
-    cand = None
-    if "입주시작월" in _df.columns:
-        s = pd.to_datetime(_df["입주시작월"], errors="coerce").dropna()
+
+    # 1) 우선순위 컬럼
+    priority_keywords = ["데이터", "기준", "마감", "컷오프", "cutoff", "집계", "최종", "마지막"]
+    candidates = []
+    for col in _df.columns:
+        col_l = str(col).lower()
+        if any(k in col_l for k in priority_keywords):
+            s = pd.to_datetime(_df[col], errors="coerce").dropna()
+            if not s.empty:
+                candidates.append(s.max())
+    if candidates:
+        return max(candidates)
+
+    # 2) 모든 열 스캔(날짜형으로 파싱 가능한 값만)
+    generic = []
+    for col in _df.columns:
+        s = pd.to_datetime(_df[col], errors="coerce").dropna()
         if not s.empty:
-            cand = s.max()
-    if cand is None or pd.isna(cand):
-        if "공급승인일자" in _df.columns:
-            s2 = pd.to_datetime(_df["공급승인일자"], errors="coerce").dropna()
-            if not s2.empty:
-                cand = s2.max()
-    if cand is None or pd.isna(cand):
-        return None
-    return cand.to_period("M").to_timestamp("M")
+            generic.append(s.max())
+    if generic:
+        return max(generic)
 
-if df is not None and not df.empty:
-    _latest_end_ts = _latest_month_end_from_df(df)
-else:
-    _latest_end_ts = None
+    return None
 
+# 기본 시작/종료일(종료일: 데이터 내 '마지막 날짜값'을 그대로 사용)
 _default_start = pd.Timestamp("2021-01-01").date()
-_default_end = (_latest_end_ts.to_pydatetime().date()
-                if _latest_end_ts is not None
+if df is not None and not df.empty:
+    _last_ts = _last_data_date_from_df(df)
+else:
+    _last_ts = None
+_default_end = (_last_ts.to_pydatetime().date()
+                if _last_ts is not None
                 else pd.Timestamp("2025-08-31").date())
 
-# 달력 위젯으로 입력(단일 날짜)
+# 달력 위젯
 시작일 = st.sidebar.date_input("시작일", value=_default_start)
 종료일 = st.sidebar.date_input("종료일", value=_default_end)
 
-# 나머지 사이드바 입력 유지
+# 나머지 사이드바 입력
 min_units = st.sidebar.number_input("세대수 하한(세대)", min_value=0, max_value=2000, step=50, value=300)
 run = st.sidebar.button("입주율 분석 실행", key="run_btn")
 
@@ -372,7 +377,7 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
 
     st.markdown("---")
 
-    # ── (아래) 입주현황 요약표 ──  ※ 기본 정렬: 공급승인일자 오름차순
+    # ── (아래) 입주현황 요약표 ──
     result_df = (
         base[["아파트명","공급승인일자","세대수","입주시작월",
               "입주세대수","잔여세대수","입주기간(개월)","입주율"]]
