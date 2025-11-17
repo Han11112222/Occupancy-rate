@@ -105,12 +105,14 @@ inject_centered_style()
 # -------------------- 사이드바 --------------------
 st.sidebar.markdown("### 데이터 / 필터")
 load_way = st.sidebar.radio("데이터 불러오기 방식", ["Repo 내 파일 사용", "파일 업로드"], index=0)
+
+# ★ 여기: 패턴과 기본 경로를 루트의 입주율.xlsx로 변경
 auto_pick_latest = st.sidebar.checkbox("최신 파일 자동 선택(패턴)", value=True)
-pattern = st.sidebar.text_input("패턴(자동 선택)", value="data/입주율*.xlsx")
+pattern = st.sidebar.text_input("패턴(자동 선택)", value="입주율*.xlsx")
 
 uploaded_file = None
 if load_way == "Repo 내 파일 사용":
-    excel_path = st.sidebar.text_input("엑셀 파일 경로(수동)", value="data/입주율.xlsx")
+    excel_path = st.sidebar.text_input("엑셀 파일 경로(수동)", value="입주율.xlsx")
 else:
     uploaded_file = st.sidebar.file_uploader("엑셀 파일 업로드", type=["xlsx"])
     excel_path = None
@@ -366,6 +368,8 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
         yearly_disp,
         use_container_width=True,
         column_config={
+
+
             "입주시작연도": st.column_config.NumberColumn("입주시작연도", format="%d"),
             "단지수": st.column_config.NumberColumn("단지수", format="%,d"),
             "총세대수": st.column_config.NumberColumn("총세대수", format="%,d"),
