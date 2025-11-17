@@ -288,7 +288,7 @@ def _last_data_date_from_df(_df: pd.DataFrame) -> pd.Timestamp | None:
         else:
             generic_dates.append(s.max())
 
-    all_dates: list[pd.Timestamp] = []
+    all_dates = []
     if priority_dates:
         all_dates.extend(priority_dates)
     if generic_dates:
@@ -309,16 +309,14 @@ _default_end = (_last_ts.to_pydatetime().date()
                 if _last_ts is not None
                 else pd.Timestamp("2025-08-31").date())
 
-# 달력 위젯(연·월만 선택, 일자는 무시)
+# 달력 위젯(연·월 기준, 일자는 무시)
 start_raw = st.sidebar.date_input(
     "시작월 (연·월 기준, 일자는 무시)",
     value=_default_start,
-    format="YYYY-MM",
 )
 end_raw = st.sidebar.date_input(
     "종료월 (연·월 기준, 일자는 무시)",
     value=_default_end,
-    format="YYYY-MM",
 )
 
 # 실제 분석에 사용할 기간: [시작월 1일 ~ 종료월 말일]
