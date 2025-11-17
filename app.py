@@ -2,7 +2,6 @@
 #                    / 표 숫자 중앙정렬 / 그래프 라벨(현재·계획·부족) / "연도별 → 요약표" 순서로 배치)
 import os, logging, warnings, shutil, time, hashlib, io, glob
 from pathlib import Path
-from datetime import date
 
 import numpy as np
 import pandas as pd
@@ -251,18 +250,6 @@ def _format_pct_cols(df_in, cols):
             df[c] = df[c].apply(lambda x: "" if pd.isna(x) else f"{x*100:.1f}%")
     return df
 
-# 월 시작/월말 변환 유틸
-def _month_start(d: date) -> pd.Timestamp:
-    if d is None:
-        return pd.NaT
-    return pd.Timestamp(year=d.year, month=d.month, day=1)
-
-def _month_end(d: date) -> pd.Timestamp:
-    if d is None:
-        return pd.NaT
-    base = pd.Timestamp(year=d.year, month=d.month, day=1)
-    return base + pd.offsets.MonthEnd(0)  # 해당 월의 말일
-
 # -------------------- 종료일 디폴트: 데이터 내 가장 최신 날짜 --------------------
 def _last_data_date_from_df(_df: pd.DataFrame) -> pd.Timestamp | None:
     """
@@ -296,32 +283,38 @@ def _last_data_date_from_df(_df: pd.DataFrame) -> pd.Timestamp | None:
 
     if all_dates:
         return max(all_dates)
-
     return None
 
-# 기본 시작/종료월 (위젯에는 연·월만 표시, 계산은 [시작월 1일 ~ 종료월 말일])
-_default_start = pd.Timestamp("2021-01-01").date()
+# 기본 시작/종료월(연·월만 사용)
+_default_start_ts = pd.Timestamp("2021-01-01")
 if df is not None and not df.empty:
     _last_ts = _last_data_date_from_df(df)
 else:
     _last_ts = None
-_default_end = (_last_ts.to_pydatetime().date()
-                if _last_ts is not None
-                else pd.Timestamp("2025-08-31").date())
+_default_end_ts = _last_ts if _last_ts is not None else pd.Timestamp("2025-08-31")
 
-# 달력 위젯(연·월 기준, 일자는 무시)
-start_raw = st.sidebar.date_input(
-    "시작월 (연·월 기준, 일자는 무시)",
-    value=_default_start,
-)
-end_raw = st.sidebar.date_input(
-    "종료월 (연·월 기준, 일자는 무시)",
-    value=_default_end,
-)
+start_year_default = int(_default_start_ts.year)
+start_month_default = int(_default_start_ts.month)
+end_year_default = int(_default_end_ts.year)
+end_month_default = int(_default_end_ts.month)
 
-# 실제 분석에 사용할 기간: [시작월 1일 ~ 종료월 말일]
-시작일 = _month_start(start_raw)
-종료일 = _month_end(end_raw)
+year_min = min(start_year_default, end_year_default) - 1
+year_max = max(start_year_default, end_year_default) + 2
+years = list(range(year_min, year_max + 1))
+months = list(range(1, 13))
+
+st.sidebar.markdown("#### 분석 기간(연·월 기준)")
+start_year = st.sidebar.selectbox("시작 연도", years, index=years.index(start_year_default))
+start_month = st.sidebar.selectbox("시작 월", months, index=start_month_default - 1)
+end_year = st.sidebar.selectbox("종료 연도", years, index=years.index(end_year_default))
+end_month = st.sidebar.selectbox("종료 월", months, index=end_month_default - 1)
+
+시작일 = pd.Timestamp(year=start_year, month=start_month, day=1)
+종료일 = pd.Timestamp(year=end_year, month=end_month, day=1) + pd.offsets.MonthEnd(0)
+
+if 시작일 > 종료일:
+    # 시작/종료가 뒤바뀐 경우 자동 교환
+    시작일, 종료일 = 종료일, 시작일
 
 # 나머지 사이드바 입력
 min_units = st.sidebar.number_input("세대수 하한(세대)", min_value=0, max_value=2000, step=50, value=300)
@@ -471,7 +464,7 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
     display_df = _format_pct_cols(display_df, ["입주율"])
 
     st.subheader(
-        f"✅ [{시작일:%Y-%m-%d} ~ {종료일:%Y-%m-%d}] (세대수 ≥ {min_units}) 입주현황 요약표"
+        f"✅ [{시작일:%Y-%m} ~ {종료일:%Y-%m}] (세대수 ≥ {min_units}) 입주현황 요약표"
     )
     st.dataframe(
         display_df,
