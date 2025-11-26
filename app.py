@@ -453,7 +453,8 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
     cohort["입주시작연도"] = cohort["입주시작월"].dt.year
 
     rate_dict = {}
-    fig = plt.figure(figsize=(14, 12), constrained_layout=False)
+    # ★ 그래프 1: 사이즈 2/3로 축소 (14,12 → 9.3,8)
+    fig = plt.figure(figsize=(9.3, 8), constrained_layout=False)
     gs = fig.add_gridspec(nrows=2, ncols=1, height_ratios=[3, 1.6])
     ax_plot = fig.add_subplot(gs[0]); ax_table = fig.add_subplot(gs[1]); ax_table.axis("off")
 
@@ -549,7 +550,8 @@ def recent2y_top_at_5m(end_date, top_n=10, min_units=0):
     )
 
     if not ranked.head(top_n).empty:
-        fig, ax = plt.subplots(figsize=(10, 6))
+        # ★ 그래프 2: 2/3 사이즈 (10,6 → 6.7,4)
+        fig, ax = plt.subplots(figsize=(6.7, 4))
         labels = [f"{n} ({h}세대)" for n, h in zip(ranked.head(top_n)["아파트명"], ranked.head(top_n)["세대수"])]
         ax.barh(labels, ranked.head(top_n)["입주율_5개월"])
         ax.set_xlabel("입주시작 5개월차 입주율"); ax.set_title(f"최근 2년 — 5개월차 입주율 TOP (세대수 ≥ {min_units})")
@@ -610,7 +612,8 @@ def cohort2025_progress(end_date, min_units=0, MAX_M=9):
     )
 
     if out_df["선택일기준_누적입주율"].notna().any():
-        fig, ax = plt.subplots(figsize=(10, 6))
+        # ★ 그래프 3: 2/3 사이즈 (10,6 → 6.7,4)
+        fig, ax = plt.subplots(figsize=(6.7, 4))
         labels = [f"{n} ({h}세대)" for n, h in zip(out_df["아파트명"], out_df["세대수"])]
         ax.barh(labels, out_df["선택일기준_누적입주율"])
         ax.set_xlabel("선택일 기준 누적 입주율"); ax.set_title("2025년 입주시작 단지 — 선택일 기준 누적 입주율")
@@ -696,7 +699,8 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
         },
     )
 
-    fig, ax = plt.subplots(figsize=(13, 5))
+    # ★ 그래프 4-1: 막대 그래프 2/3 사이즈 (13,5 → 8.7,3.3)
+    fig, ax = plt.subplots(figsize=(8.7, 3.3))
     worst = out.head(top_n).copy()
     y_labels = [f"{n} ({h}세대) · {m}개월차" for n, h, m in zip(worst["아파트명"], worst["세대수"], worst["경과개월(선택일기준)"])]
     ax.barh(y_labels, worst["계획누적세대(선택일)"], alpha=0.55, edgecolor="none", label="계획 누적 세대")
@@ -722,7 +726,8 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     ax.invert_yaxis(); ax.legend(loc="lower right", ncol=2); ax.grid(axis="x", alpha=0.3)
     fig.tight_layout(); apply_korean_font(fig); st.pyplot(fig, use_container_width=True)
 
-    fig2, ax2 = plt.subplots(figsize=(9, 7))
+    # ★ 그래프 4-2: 버블 산포도 2/3 사이즈 (9,7 → 6,4.7)
+    fig2, ax2 = plt.subplots(figsize=(6, 4.7))
     scatter_df = worst.dropna(subset=["계획누적(선택일)", "실제누적(선택일)", "편차(pp)"]).copy()
     if scatter_df.empty:
         st.info("⚠️ 산포도에 표시할 값이 없어(계획/실제 누적 비율 NaN)."); return out
