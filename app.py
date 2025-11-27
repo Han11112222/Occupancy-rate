@@ -12,6 +12,9 @@ import streamlit as st
 
 st.set_page_config(page_title="입주율 분석", layout="wide")
 
+# 그래프 전체 스케일 (가로·세로 30% 축소)
+FIG_SCALE = 0.7
+
 # -------------------- 코드 버전(파일 해시) --------------------
 def _code_digest() -> str:
     try:
@@ -92,16 +95,32 @@ def apply_korean_font(fig):
 
 chosen_font = set_korean_font_strict()
 
-# -------------------- 표 중앙정렬(CSS) --------------------
+# -------------------- 표 중앙정렬 + 글자 30% 확대(CSS) --------------------
 def inject_centered_style():
     st.markdown(
         """
         <style>
-        [data-testid="stDataFrame"] div[role="gridcell"]{display:flex;justify-content:center !important;}
-        [data-testid="stDataFrame"] div[role="columnheader"]{display:flex;justify-content:center !important;}
-        [data-testid="stDataFrame"] table td,[data-testid="stDataFrame"] table th{ text-align:center !important;}
-        [data-testid="stDataFrame"] table td div,[data-testid="stDataFrame"] table th div{justify-content:center !important;}
-        [data-testid="stDataFrame"] thead tr th div[role="button"]{justify-content:center !important;}
+        /* 모든 DataFrame 글자 30% 확대 */
+        [data-testid="stDataFrame"] * {
+            font-size: 1.3em !important;
+        }
+        /* 셀/헤더 중앙 정렬 */
+        [data-testid="stDataFrame"] div[role="gridcell"],
+        [data-testid="stDataFrame"] div[role="columnheader"] {
+            display: flex;
+            justify-content: center !important;
+            align-items: center !important;
+            text-align: center !important;
+        }
+        [data-testid="stDataFrame"] table td,
+        [data-testid="stDataFrame"] table th {
+            text-align: center !important;
+        }
+        [data-testid="stDataFrame"] table td div,
+        [data-testid="stDataFrame"] table th div,
+        [data-testid="stDataFrame"] thead tr th div[role="button"] {
+            justify-content: center !important;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -453,7 +472,7 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
     cohort["입주시작연도"] = cohort["입주시작월"].dt.year
 
     rate_dict = {}
-    fig = plt.figure(figsize=(14, 12), constrained_layout=False)
+    fig = plt.figure(figsize=(14*FIG_SCALE, 12*FIG_SCALE), constrained_layout=False)
     gs = fig.add_gridspec(nrows=2, ncols=1, height_ratios=[3, 1.6])
     ax_plot = fig.add_subplot(gs[0]); ax_table = fig.add_subplot(gs[1]); ax_table.axis("off")
 
@@ -501,7 +520,10 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
                            rowLabels=display_df.index.tolist(),
                            colLabels=display_df.columns.tolist(),
                            cellLoc="center", loc="center")
-        t.auto_set_font_size(False); t.set_fontsize(11); t.scale(1.0, 1.7)
+        t.auto_set_font_size(False)
+        # 표 글자 크기 30% 확대 (기존 11 → 14)
+        t.set_fontsize(14)
+        t.scale(1.0, 1.7)
         plt.subplots_adjust(hspace=0.28)
         apply_korean_font(fig); st.pyplot(fig, use_container_width=True)
     else:
@@ -549,7 +571,7 @@ def recent2y_top_at_5m(end_date, top_n=10, min_units=0):
     )
 
     if not ranked.head(top_n).empty:
-        fig, ax = plt.subplots(figsize=(10, 6))
+        fig, ax = plt.subplots(figsize=(10*FIG_SCALE, 6*FIG_SCALE))
         labels = [f"{n} ({h}세대)" for n, h in zip(ranked.head(top_n)["아파트명"], ranked.head(top_n)["세대수"])]
         ax.barh(labels, ranked.head(top_n)["입주율_5개월"])
         ax.set_xlabel("입주시작 5개월차 입주율"); ax.set_title(f"최근 2년 — 5개월차 입주율 TOP (세대수 ≥ {min_units})")
@@ -610,7 +632,7 @@ def cohort2025_progress(end_date, min_units=0, MAX_M=9):
     )
 
     if out_df["선택일기준_누적입주율"].notna().any():
-        fig, ax = plt.subplots(figsize=(10, 6))
+        fig, ax = plt.subplots(figsize=(10*FIG_SCALE, 6*FIG_SCALE))
         labels = [f"{n} ({h}세대)" for n, h in zip(out_df["아파트명"], out_df["세대수"])]
         ax.barh(labels, out_df["선택일기준_누적입주율"])
         ax.set_xlabel("선택일 기준 누적 입주율"); ax.set_title("2025년 입주시작 단지 — 선택일 기준 누적 입주율")
@@ -696,7 +718,7 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
         },
     )
 
-    fig, ax = plt.subplots(figsize=(13, 5))
+    fig, ax = plt.subplots(figsize=(13*FIG_SCALE, 5*FIG_SCALE))
     worst = out.head(top_n).copy()
     y_labels = [f"{n} ({h}세대) · {m}개월차" for n, h, m in zip(worst["아파트명"], worst["세대수"], worst["경과개월(선택일기준)"])]
     ax.barh(y_labels, worst["계획누적세대(선택일)"], alpha=0.55, edgecolor="none", label="계획 누적 세대")
@@ -722,7 +744,7 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     ax.invert_yaxis(); ax.legend(loc="lower right", ncol=2); ax.grid(axis="x", alpha=0.3)
     fig.tight_layout(); apply_korean_font(fig); st.pyplot(fig, use_container_width=True)
 
-    fig2, ax2 = plt.subplots(figsize=(9, 7))
+    fig2, ax2 = plt.subplots(figsize=(9*FIG_SCALE, 7*FIG_SCALE))
     scatter_df = worst.dropna(subset=["계획누적(선택일)", "실제누적(선택일)", "편차(pp)"]).copy()
     if scatter_df.empty:
         st.info("⚠️ 산포도에 표시할 값이 없어(계획/실제 누적 비율 NaN)."); return out
