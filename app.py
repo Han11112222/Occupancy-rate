@@ -144,14 +144,6 @@ def inject_centered_style():
 
 inject_centered_style()
 
-# -------------------- DataFrame 가로 절반 폭으로 보여주는 헬퍼 --------------------
-def show_df_half_width(df: pd.DataFrame, **kwargs):
-    c1, c2 = st.columns([1, 1])
-    with c1:
-        st.dataframe(df, **kwargs)
-    # c2는 여백 역할만
-
-
 # -------------------- 사이드바 --------------------
 st.sidebar.markdown("### 데이터 / 필터")
 load_way = st.sidebar.radio("데이터 불러오기 방식", ["Repo 내 파일 사용", "파일 업로드"], index=0)
@@ -478,7 +470,7 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
             )
     yearly_disp = _format_pct_cols(yearly_disp, ["누적입주율"])
 
-    show_df_half_width(
+    st.dataframe(
         yearly_disp,
         use_container_width=True,
         column_config={
@@ -525,7 +517,7 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
     st.subheader(
         f"✅ [{시작일:%Y-%m} ~ {종료일:%Y-%m}] (세대수 ≥ {min_units}) 입주현황 요약표"
     )
-    show_df_half_width(
+    st.dataframe(
         display_df,
         use_container_width=True,
         column_config={
@@ -701,7 +693,7 @@ def recent2y_top_at_5m(end_date, top_n=10, min_units=0):
     )
 
     st.subheader(f"🏆 최근 2년 — 5개월차 입주율 TOP {top_n} (세대수 ≥ {min_units})")
-    show_df_half_width(
+    st.dataframe(
         disp,
         use_container_width=True,
         column_config={
@@ -803,7 +795,7 @@ def cohort2025_progress(end_date, min_units=0, MAX_M=9):
     st.subheader(
         f"📊 2025년 입주시작 단지 — 선택일({end_date:%Y-%m-%d}) 기준 누적 입주율 (세대수 ≥ {min_units})"
     )
-    show_df_half_width(
+    st.dataframe(
         disp,
         use_container_width=True,
         column_config={
@@ -945,7 +937,7 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     st.subheader(
         f"🚨 계획 대비 저조 단지 (선택일 {end_date:%Y-%m-%d}, 세대수 ≥ {min_units}) — 상위 {top_n}개"
     )
-    show_df_half_width(
+    st.dataframe(
         disp,
         use_container_width=True,
         column_config={
