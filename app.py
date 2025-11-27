@@ -485,7 +485,7 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
     cohort["입주시작연도"] = cohort["입주시작월"].dt.year
 
     rate_dict = {}
-    fig = plt.figure(figsize=(14*FIG_SCALE, 12*FIG_SCALE), constrained_layout=False)
+    fig = plt.figure(figsize=(9*FIG_SCALE, 7*FIG_SCALE), constrained_layout=False)
     gs = fig.add_gridspec(nrows=2, ncols=1, height_ratios=[3, 1.6])
     ax_plot = fig.add_subplot(gs[0]); ax_table = fig.add_subplot(gs[1]); ax_table.axis("off")
 
