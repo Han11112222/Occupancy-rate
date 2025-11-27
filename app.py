@@ -12,8 +12,8 @@ import streamlit as st
 
 st.set_page_config(page_title="입주율 분석", layout="wide")
 
-# 그래프 공통 스케일 (가로/세로 30% 축소)
-FIG_SCALE = 0.7
+# 그래프 공통 스케일 (기존 0.7 → 40% 축소 ≒ 0.42)
+FIG_SCALE = 0.42
 
 # -------------------- 코드 버전(파일 해시) --------------------
 def _code_digest() -> str:
@@ -32,7 +32,7 @@ def set_korean_font_strict():
         os.path.abspath("fonts/NanumGothic-Regular.ttf"),
         os.path.abspath("fonts/NotoSansKR-Regular.otf"),
         "assets/fonts/NanumGothic.ttf",
-        "assets/fonts/NotoSansKR-Regular.otf",
+        "assets/NotoSansKR-Regular.otf",
     ]
     system_candidates = [
         "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
@@ -104,7 +104,6 @@ def inject_centered_style():
     st.markdown(
         """
         <style>
-        /* 디버그용: 이 클래스가 있으면 'CSS v2025-11-27' 텍스트가 생김 */
         .occupancy-debug-version::after {
             content: " CSS v2025-11-27 ";
             color: #999999;
@@ -112,7 +111,7 @@ def inject_centered_style():
             margin-left: 8px;
         }
 
-        /* 모든 DataFrame 폰트를 1.5rem로 (대략 1.5배) */
+        /* DataFrame 폰트 크게 */
         div[data-testid="stDataFrame"] table,
         div[data-testid="stDataFrame"] table * {
             font-size: 1.5rem !important;
@@ -148,7 +147,6 @@ inject_centered_style()
 st.sidebar.markdown("### 데이터 / 필터")
 load_way = st.sidebar.radio("데이터 불러오기 방식", ["Repo 내 파일 사용", "파일 업로드"], index=0)
 
-# 루트에 있는 입주율.xlsx 사용
 auto_pick_latest = st.sidebar.checkbox("최신 파일 자동 선택(패턴)", value=True)
 pattern = st.sidebar.text_input("패턴(자동 선택)", value="입주율*.xlsx")
 
@@ -335,7 +333,6 @@ def _last_data_date_from_df(_df: pd.DataFrame) -> pd.Timestamp | None:
     return None
 
 
-# 기본 시작/종료일 (date_input용; 내부에서는 연·월만 사용)
 _default_start = pd.Timestamp("2021-01-01").date()
 if df is not None and not df.empty:
     _last_ts = _last_data_date_from_df(df)
@@ -358,7 +355,6 @@ end_raw = st.sidebar.date_input(
     value=_default_end,
 )
 
-# 연·월만 사용해서 실제 계산용 시작/종료일 생성
 start_raw = pd.to_datetime(start_raw)
 end_raw = pd.to_datetime(end_raw)
 
@@ -368,7 +364,6 @@ end_raw = pd.to_datetime(end_raw)
 if 시작일 > 종료일:
     시작일, 종료일 = 종료일, 시작일
 
-# 나머지 사이드바 입력
 min_units = st.sidebar.number_input(
     "세대수 하한(세대)", min_value=0, max_value=2000, step=50, value=300
 )
@@ -376,7 +371,6 @@ run = st.sidebar.button("입주율 분석 실행", key="run_btn")
 
 # -------------------- 분석/시각화 --------------------
 def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
-    """연도별(메트릭+표) → 요약표 순으로 표시"""
     시작일 = pd.to_datetime(시작일)
     종료일 = pd.to_datetime(종료일)
     month_cols = ensure_start_index(df)
@@ -425,7 +419,6 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
         base["입주율"] = []
         base["잔여세대수"] = []
 
-    # ── (상단) 연도별 가중 입주율 ──
     ybase = base.copy()
     if not ybase.empty:
         ybase["입주시작연도"] = pd.to_datetime(ybase["입주시작월"]).dt.year
@@ -485,7 +478,6 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
 
     st.markdown("---")
 
-    # ── (아래) 입주현황 요약표 ──
     result_df = (
         base[
             [
@@ -631,7 +623,7 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
             loc="center",
         )
         t.auto_set_font_size(False)
-        t.set_fontsize(13)  # 표 폰트 약 30% 확대
+        t.set_fontsize(13)
         t.scale(1.0, 1.6)
         plt.subplots_adjust(hspace=0.28)
         apply_korean_font(fig)
@@ -1039,51 +1031,50 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     ).copy()
     if scatter_df.empty:
         st.info("⚠️ 산포도에 표시할 값이 없어(계획/실제 누적 비율 NaN).")
-        return out
-    bubble_area = _bubble_area_from_units(
-        scatter_df["세대수"], min_area=250, max_area=2800
-    )
-    sc = ax2.scatter(
-        scatter_df["계획누적(선택일)"],
-        scatter_df["실제누적(선택일)"],
-        s=bubble_area,
-        c=scatter_df["편차(pp)"],
-        alpha=0.9,
-        edgecolors="k",
-        linewidths=0.6,
-    )
-    ax2.plot([0, 1], [0, 1], "--", linewidth=1)
-    xmax = max(1.0, scatter_df["계획누적(선택일)"].max() * 1.05)
-    ymax = max(1.0, scatter_df["실제누적(선택일)"].max() * 1.05)
-    ax2.set_xlim(0, min(1.0, xmax))
-    ax2.set_ylim(0, min(1.0, ymax))
-    ax2.set_xlabel("계획 누적(비율)")
-    ax2.set_ylabel("실제 누적(비율)")
-    ax2.set_title("계획 vs 실제 (버블=세대수, 색=편차)")
-    cb = plt.colorbar(sc)
-    cb.set_label("편차(pp)")
-    for _, r in scatter_df.iterrows():
-        ax2.text(
-            float(r["계획누적(선택일)"]) + 0.012,
-            float(r["실제누적(선택일)"]) + 0.012,
-            f"{str(r['아파트명'])}",
-            fontsize=10,
-            alpha=0.95,
+    else:
+        bubble_area = _bubble_area_from_units(
+            scatter_df["세대수"], min_area=250, max_area=2800
         )
-    ax2.grid(alpha=0.3)
-    fig2.tight_layout()
-    apply_korean_font(fig2)
-    st.pyplot(fig2)
+        sc = ax2.scatter(
+            scatter_df["계획누적(선택일)"],
+            scatter_df["실제누적(선택일)"],
+            s=bubble_area,
+            c=scatter_df["편차(pp)"],
+            alpha=0.9,
+            edgecolors="k",
+            linewidths=0.6,
+        )
+        ax2.plot([0, 1], [0, 1], "--", linewidth=1)
+        xmax = max(1.0, scatter_df["계획누적(선택일)"].max() * 1.05)
+        ymax = max(1.0, scatter_df["실제누적(선택일)"].max() * 1.05)
+        ax2.set_xlim(0, min(1.0, xmax))
+        ax2.set_ylim(0, min(1.0, ymax))
+        ax2.set_xlabel("계획 누적(비율)")
+        ax2.set_ylabel("실제 누적(비율)")
+        ax2.set_title("계획 vs 실제 (버블=세대수, 색=편차)")
+        cb = plt.colorbar(sc)
+        cb.set_label("편차(pp)")
+        for _, r in scatter_df.iterrows():
+            ax2.text(
+                float(r["계획누적(선택일)"]) + 0.012,
+                float(r["실제누적(선택일)"]) + 0.012,
+                f"{str(r['아파트명'])}",
+                fontsize=10,
+                alpha=0.95,
+            )
+        ax2.grid(alpha=0.3)
+        fig2.tight_layout()
+        apply_korean_font(fig2)
+        st.pyplot(fig2)
     return out
 
 
 # -------------------- 실행 --------------------
-st.title("입주율 분석 대시보드 v3")  # ← 제목에 v3 표시
+st.title("입주율 분석 대시보드 v3")
 
 if chosen_font:
     st.caption(f"한글 폰트 적용: {chosen_font}")
 
-# CSS 적용 여부 확인용 버전 태그
 st.caption(f"{data_caption} | code_ver={CODE_VER} | UIv=2025-11-27")
 st.markdown('<div class="occupancy-debug-version"></div>', unsafe_allow_html=True)
 
