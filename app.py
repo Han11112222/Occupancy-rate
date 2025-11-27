@@ -100,43 +100,46 @@ def inject_centered_style():
     st.markdown(
         """
         <style>
-        /* 전체 DataFrame 폰트 30% 확대 */
-        [data-testid="stDataFrame"] {
+        /* 디버그용: 이 클래스가 있으면 'CSS v2025-11-27' 텍스트가 생김 */
+        .occupancy-debug-version::after {
+            content: " CSS v2025-11-27 ";
+            color: #999999;
+            font-size: 0.8rem;
+            margin-left: 8px;
+        }
+
+        /* 모든 DataFrame 폰트를 30% 크게 */
+        div[data-testid="stDataFrame"] table,
+        div[data-testid="stDataFrame"] table * {
             font-size: 1.3rem !important;
         }
-        [data-testid="stDataFrame"] table {
-            font-size: 1.3rem !important;
+
+        /* 셀/헤더 중앙 정렬(가장 강하게) */
+        div[data-testid="stDataFrame"] div[role="gridcell"],
+        div[data-testid="stDataFrame"] div[role="columnheader"] {
+            display: flex;
+            justify-content: center !important;
+            align-items: center !important;
+            text-align: center !important;
         }
-        /* 셀/헤더 중앙 정렬 */
-        [data-testid="stDataFrame"] div[role="gridcell"]{
-            display:flex;
-            justify-content:center !important;
-            align-items:center !important;
-            text-align:center !important;
+
+        div[data-testid="stDataFrame"] table td,
+        div[data-testid="stDataFrame"] table th {
+            text-align: center !important;
         }
-        [data-testid="stDataFrame"] div[role="columnheader"]{
-            display:flex;
-            justify-content:center !important;
-            align-items:center !important;
-            text-align:center !important;
-        }
-        [data-testid="stDataFrame"] table td,
-        [data-testid="stDataFrame"] table th{
-            text-align:center !important;
-        }
-        [data-testid="stDataFrame"] table td div,
-        [data-testid="stDataFrame"] table th div{
-            justify-content:center !important;
-        }
-        [data-testid="stDataFrame"] thead tr th div[role="button"]{
-            justify-content:center !important;
+
+        div[data-testid="stDataFrame"] table td > div,
+        div[data-testid="stDataFrame"] table th > div {
+            justify-content: center !important;
         }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
+# 함수 정의 바로 아래에서 한 번만 호출
 inject_centered_style()
+
 
 # -------------------- 사이드바 --------------------
 st.sidebar.markdown("### 데이터 / 필터")
@@ -772,9 +775,15 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     return out
 
 # -------------------- 실행 --------------------
-st.title("입주율 분석 대시보드")
-if chosen_font: st.caption(f"한글 폰트 적용: {chosen_font}")
-st.caption(f"{data_caption} | code_ver={CODE_VER}")
+st.title("입주율 분석 대시보드 v3")  # ← 제목에 v3 표시
+
+if chosen_font:
+    st.caption(f"한글 폰트 적용: {chosen_font}")
+
+# CSS 적용 여부 확인용 버전 태그
+st.caption(f"{data_caption} | code_ver={CODE_VER} | UIv=2025-11-27")
+st.markdown('<div class="occupancy-debug-version"></div>', unsafe_allow_html=True)
+
 
 if run:
     if df.empty:
