@@ -512,18 +512,23 @@ def recent2y_top_at_5m(end_date, top_n=10, min_units=0):
     )
 
     if not ranked.head(top_n).empty:
-        fig, ax = plt.subplots(figsize=(10, 6))
+        # ---- 여기부터: 그래프 모양만 정리 ----
+        fig, ax = plt.subplots(figsize=(8, 5))
         labels = [f"{n} ({h}세대)" for n, h in zip(ranked.head(top_n)["아파트명"], ranked.head(top_n)["세대수"])]
-        ax.barh(labels, ranked.head(top_n)["입주율_5개월"])
-        ax.set_xlabel("입주시작 5개월차 입주율"); ax.set_title(f"최근 2년 — 5개월차 입주율 TOP (세대수 ≥ {min_units})")
-        ax.invert_yaxis(); ax.set_xlim(0, 1)
+        values = ranked.head(top_n)["입주율_5개월"]
+        ax.barh(labels, values)
+        ax.set_xlabel("입주시작 5개월차 입주율")
+        ax.set_title(f"최근 2년 — 5개월차 입주율 TOP (세대수 ≥ {min_units})")
+        ax.invert_yaxis()
+        ax.set_xlim(0, 1)
 
-        # y축 글자 크기 줄이고, 왼쪽 여백 넉넉히
+        # y축 글자 조금 작게
         ax.tick_params(axis="y", labelsize=9)
-        for y, v in enumerate(ranked.head(top_n)["입주율_5개월"]):
+
+        for y, v in enumerate(values):
             ax.text(min(v + 0.01, 0.98), y, f"{v*100:.1f}%", va="center")
 
-        # 단지명 잘 안 잘리도록 여백 조정
+        # 단지명이 안 잘리도록 왼쪽 여백 확보
         fig.subplots_adjust(left=0.35, right=0.98, top=0.9, bottom=0.12)
 
         apply_korean_font(fig); st.pyplot(fig, use_container_width=True)
@@ -580,18 +585,23 @@ def cohort2025_progress(end_date, min_units=0, MAX_M=9):
     )
 
     if out_df["선택일기준_누적입주율"].notna().any():
-        fig, ax = plt.subplots(figsize=(10, 6))
+        # ---- 여기부터: 그래프 모양만 정리 ----
+        fig, ax = plt.subplots(figsize=(8, 5))
         labels = [f"{n} ({h}세대)" for n, h in zip(out_df["아파트명"], out_df["세대수"])]
-        ax.barh(labels, out_df["선택일기준_누적입주율"])
-        ax.set_xlabel("선택일 기준 누적 입주율"); ax.set_title("2025년 입주시작 단지 — 선택일 기준 누적 입주율")
-        ax.invert_yaxis(); ax.set_xlim(0, 1)
+        values = out_df["선택일기준_누적입주율"]
+        ax.barh(labels, values)
+        ax.set_xlabel("선택일 기준 누적 입주율")
+        ax.set_title("2025년 입주시작 단지 — 선택일 기준 누적 입주율")
+        ax.invert_yaxis()
+        ax.set_xlim(0, 1)
 
-        # y축 글자·여백 조정
         ax.tick_params(axis="y", labelsize=9)
-        for y, v in enumerate(out_df["선택일기준_누적입주율"]):
-            if pd.notna(v): ax.text(min(v + 0.01, 0.98), y, f"{v*100:.1f}%", va="center")
 
-        fig.subplots_adjust(left=0.4, right=0.98, top=0.9, bottom=0.12)
+        for y, v in enumerate(values):
+            if pd.notna(v):
+                ax.text(min(v + 0.01, 0.98), y, f"{v*100:.1f}%", va="center")
+
+        fig.subplots_adjust(left=0.38, right=0.98, top=0.9, bottom=0.12)
 
         apply_korean_font(fig); st.pyplot(fig, use_container_width=True)
     else:
@@ -696,13 +706,9 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
 
     ax.set_xlabel("누적 세대수"); ax.set_title("계획 대비 저조 단지 — 계획 vs 실적 누적 세대수")
     ax.invert_yaxis(); ax.legend(loc="lower right", ncol=2); ax.grid(axis="x", alpha=0.3)
+    fig.tight_layout(); apply_korean_font(fig); st.pyplot(fig, use_container_width=True)
 
-    # y축 라벨·여백 조정
-    ax.tick_params(axis="y", labelsize=9)
-    fig.subplots_adjust(left=0.38, right=0.98, top=0.9, bottom=0.12)
-
-    apply_korean_font(fig); st.pyplot(fig, use_container_width=True)
-
+    # 맨 하단 산포도 그래프 그대로 유지
     fig2, ax2 = plt.subplots(figsize=(9, 7))
     scatter_df = worst.dropna(subset=["계획누적(선택일)", "실제누적(선택일)", "편차(pp)"]).copy()
     if scatter_df.empty:
