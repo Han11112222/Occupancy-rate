@@ -913,7 +913,7 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
         },
     )
 
-    # 가로 조금 넓게, 높이 줄이고 y라벨 작게
+    # 가로 넓게, 높이 줄이고 y라벨 작게
     fig, ax = plt.subplots(figsize=(13 * FIG_SCALE * 1.1, 5 * FIG_SCALE * 0.8))
     worst = out.head(top_n).copy()
     y_labels = [
@@ -967,4 +967,58 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
             ax.text(
                 mid,
                 y,
-                f
+                f"{lack:,}세대 부족",
+                va="center",
+                ha="center",
+            )
+
+    ax.set_xlabel("선택일 기준 누적 세대수", fontsize=11)
+    ax.set_title(
+        f"2025년 입주시작 단지 — 계획 대비 누적세대 비교 (저조 상위 {top_n}개)",
+        fontsize=13,
+    )
+    ax.invert_yaxis()
+    ax.legend(loc="lower right", fontsize=9)
+    ax.grid(axis="x", alpha=0.3)
+    ax.tick_params(axis="y", labelsize=9)
+
+    fig.tight_layout()
+    apply_korean_font(fig)
+    st.pyplot(fig)
+
+    return out
+
+
+# -------------------- 메인 레이아웃 --------------------
+st.title("📊 입주율 분석 대시보드")
+st.caption(f"코드 ver={CODE_VER} | {data_caption}")
+
+st.markdown(
+    "- 좌측에서 분석 기간과 세대수 하한을 선택한 뒤 **[입주율 분석 실행]** 버튼을 눌러."
+)
+
+if df is None or df.empty:
+    st.warning("엑셀 데이터를 불러오지 못했어. 사이드바에서 파일 경로나 업로드 여부를 확인해줘.")
+else:
+    if run:
+        st.markdown("### 1. 기간별 입주현황 요약")
+        analyze_occupancy_by_period(시작일, 종료일, min_units=min_units)
+
+        st.markdown("---")
+        st.markdown("### 2. 연도별 월별 누적 입주율 (그래프 + 표)")
+        plot_yearly_avg_occupancy_with_plan(시작일, 종료일, min_units=min_units)
+
+        st.markdown("---")
+        show_top10 = st.checkbox("최근 2년 — 5개월차 입주율 TOP10 보기", value=False)
+        if show_top10:
+            recent2y_top_at_5m(종료일, top_n=10, min_units=min_units)
+
+        st.markdown("---")
+        st.markdown("### 3. 2025년 코호트 상세현황")
+        cohort2025_progress(종료일, min_units=min_units)
+
+        st.markdown("---")
+        st.markdown("### 4. 2025년 계획 대비 저조 단지")
+        underperformers_vs_plan(종료일, min_units=min_units)
+    else:
+        st.info("사이드바에서 조건을 설정하고 **입주율 분석 실행** 버튼을 눌러줘.")
