@@ -526,7 +526,10 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
 
 
 def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
-    """연도별 누적입주율 라인 + 표(표는 더 작게)"""
+    """
+    연도별 입주시작 단지의 월별 누적입주율 + 사업계획 기준선
+    - 그래프와 표를 분리해서 출력 (겹침 방지)
+    """
     month_cols = ensure_start_index(df)
     MAX_M = 9
     start_date = pd.to_datetime(start_date)
@@ -541,14 +544,8 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
     cohort["입주시작연도"] = cohort["입주시작월"].dt.year
 
     rate_dict = {}
-    # 전체 높이 약간 줄이고, 테이블 부분 비중 더 줄임
-    fig = plt.figure(figsize=(9 * FIG_SCALE, 5.2 * FIG_SCALE), constrained_layout=False)
-    gs = fig.add_gridspec(nrows=2, ncols=1, height_ratios=[3.5, 0.8])
-    ax_plot = fig.add_subplot(gs[0])
-    ax_table = fig.add_subplot(gs[1])
-    ax_table.axis("off")
-
     has_data = False
+
     for y, g in cohort.groupby("입주시작연도"):
         rates = []
         for m in range(1, MAX_M + 1):
@@ -571,7 +568,6 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
         if any(pd.notna(r) and r > 0 for r in rates):
             has_data = True
         rate_dict[y] = rates
-        ax_plot.plot(range(1, MAX_M + 1), rates, marker="o", label=f"{y}년")
 
     PLAN = {
         1: 9.29,
@@ -586,45 +582,49 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
     }
     plan_x = list(range(1, MAX_M + 1))
     plan_y = [min(1.0, PLAN[i] / 100) for i in plan_x]
-    ax_plot.plot(plan_x, plan_y, linestyle="--", marker="x", label="사업계획 기준")
 
     idx_names = [f"{i}개월" for i in plan_x]
     graph_raw_df = pd.DataFrame(rate_dict, index=idx_names)
 
-    if has_data:
-        ax_plot.set_title(f"연도별 입주시작 단지의 월별 누적 입주율(세대수 ≥ {min_units})", fontsize=13)
-        ax_plot.set_xlabel("입주경과 개월\n(해당 n개월 이상 경과 단지만 포함)", fontsize=11)
-        ax_plot.set_ylabel("누적 평균 입주율", fontsize=11)
-        ax_plot.set_xticks(plan_x, [f"{i}개월" for i in plan_x])
-        ax_plot.set_ylim(0, 1)
-        ax_plot.grid(True, alpha=0.4)
-        ax_plot.legend(ncol=3, loc="lower right", fontsize=9)
-        ax_plot.tick_params(axis="both", labelsize=9)
-
-        table_df = graph_raw_df.T.copy()
-        plan_row = pd.DataFrame([plan_y], index=["사업계획 기준"], columns=table_df.columns)
-        table_df = pd.concat([table_df, plan_row], axis=0)
-
-        def _fmt_pct(x):
-            return "" if pd.isna(x) else f"{x*100:.1f}%"
-
-        display_df = table_df.applymap(_fmt_pct)
-        t = ax_table.table(
-            cellText=display_df.values,
-            rowLabels=display_df.index.tolist(),
-            colLabels=display_df.columns.tolist(),
-            cellLoc="center",
-            loc="center",
-        )
-        t.auto_set_font_size(False)
-        # 표/폰트 더 작게 (이전보다 작게)
-        t.set_fontsize(8)
-        t.scale(0.7, 0.9)
-        plt.subplots_adjust(hspace=0.25)
-        apply_korean_font(fig)
-        st.pyplot(fig)
-    else:
+    if not has_data:
         st.info("⚠️ 표시할 연도별 입주율 데이터가 없어.")
+        return
+
+    # ---- 1) 그래프만 출력 ----
+    fig, ax = plt.subplots(figsize=(9 * FIG_SCALE, 5 * FIG_SCALE))
+    for y, rates in rate_dict.items():
+        ax.plot(plan_x, rates, marker="o", label=f"{y}년")
+
+    ax.plot(plan_x, plan_y, linestyle="--", marker="x", label="사업계획 기준")
+
+    ax.set_title(f"연도별 입주시작 단지의 월별 누적 입주율(세대수 ≥ {min_units})", fontsize=13)
+    ax.set_xlabel("입주경과 개월\n(해당 n개월 이상 경과 단지만 포함)", fontsize=11)
+    ax.set_ylabel("누적 평균 입주율", fontsize=11)
+    ax.set_xticks(plan_x, [f"{i}개월" for i in plan_x])
+    ax.set_ylim(0, 1)
+    ax.grid(True, alpha=0.4)
+    ax.legend(ncol=3, loc="lower right", fontsize=9)
+    ax.tick_params(axis="both", labelsize=9)
+
+    fig.tight_layout()
+    apply_korean_font(fig)
+    st.pyplot(fig)
+
+    # ---- 2) 동일 데이터를 표로 별도 표시 ----
+    table_df = graph_raw_df.T.copy()  # 행=연도, 열=개월
+    plan_row = pd.DataFrame([plan_y], index=["사업계획 기준"], columns=table_df.columns)
+    table_df = pd.concat([table_df, plan_row], axis=0)
+
+    table_df_display = _format_pct_cols(table_df, list(table_df.columns))
+
+    st.markdown("##### 연도별 월별 누적 입주율 요약표")
+    st.dataframe(
+        table_df_display,
+        use_container_width=True,
+        column_config={
+            c: st.column_config.TextColumn(c) for c in table_df_display.columns
+        },
+    )
 
 
 def recent2y_top_at_5m(end_date, top_n=10, min_units=0):
@@ -678,7 +678,6 @@ def recent2y_top_at_5m(end_date, top_n=10, min_units=0):
     )
 
     if not ranked.head(top_n).empty:
-        # 높이 조금 줄이고, y축 글자 크기 줄이기
         fig, ax = plt.subplots(figsize=(10 * FIG_SCALE, 5 * FIG_SCALE))
         labels = [
             f"{n} ({h}세대)" for n, h in zip(ranked.head(top_n)["아파트명"], ranked.head(top_n)["세대수"])
@@ -771,7 +770,6 @@ def cohort2025_progress(end_date, min_units=0, MAX_M=9):
     )
 
     if out_df["선택일기준_누적입주율"].notna().any():
-        # 폭은 조금 넓게, 높이는 줄이고, y축 라벨 글자 줄이기
         fig, ax = plt.subplots(figsize=(11 * FIG_SCALE, 5 * FIG_SCALE * 0.8))
         labels = [f"{n} ({h}세대)" for n, h in zip(out_df["아파트명"], out_df["세대수"])]
         ax.barh(labels, out_df["선택일기준_누적입주율"])
@@ -912,7 +910,7 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
         },
     )
 
-    # ── (1) 가로 막대 그래프: 글자 줄이고 가로로 넓게 ──
+    # ── (1) 가로 막대 그래프 ──
     fig, ax = plt.subplots(figsize=(13 * FIG_SCALE * 1.1, 5 * FIG_SCALE * 0.8))
     worst = out.head(top_n).copy()
     y_labels = [
