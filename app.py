@@ -12,7 +12,7 @@ import streamlit as st
 
 st.set_page_config(page_title="입주율 분석", layout="wide")
 
-# 그래프 공통 스케일 (기존 대비 40% 축소)
+# 그래프 공통 스케일 (1보다 작으면 전체 축소)
 FIG_SCALE = 0.6
 
 
@@ -133,7 +133,7 @@ def inject_centered_style():
         div[data-testid="stDataFrame"] table td,
         div[data-testid="stDataFrame"] table th {
             text-align: center !important;
-            padding: 0.5rem 1.0rem !important;  /* 좌우 여백 크게 */
+            padding: 0.5rem 1.0rem !important;
         }
 
         div[data-testid="stDataFrame"] table td > div,
@@ -617,7 +617,7 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
     apply_korean_font(fig)
     st.pyplot(fig)
 
-    # ── 2) 같은 데이터를 표로 별도 표시 (Streamlit 표, 글자 겹침 없음) ──
+    # ── 2) 같은 데이터를 표로 별도 표시 ──
     table_df = graph_raw_df.T.copy()  # 행=연도, 열=개월
     plan_row = pd.DataFrame([plan_y], index=["사업계획 기준"], columns=table_df.columns)
     table_df = pd.concat([table_df, plan_row], axis=0)
@@ -683,7 +683,6 @@ def recent2y_top_at_5m(end_date, top_n=10, min_units=0):
     )
 
     if not ranked.head(top_n).empty:
-        # 높이 30% 줄이고, y라벨 글자도 30% 작게
         fig, ax = plt.subplots(figsize=(10 * FIG_SCALE, 6 * FIG_SCALE * 0.7))
         labels = [
             f"{n} ({h}세대)" for n, h in zip(ranked.head(top_n)["아파트명"], ranked.head(top_n)["세대수"])
@@ -774,8 +773,8 @@ def cohort2025_progress(end_date, min_units=0, MAX_M=9):
     )
 
     if out_df["선택일기준_누적입주율"].notna().any():
-        # 높이 30% 줄이고, y라벨 작게
-        fig, ax = plt.subplots(figsize=(10 * FIG_SCALE, 6 * FIG_SCALE * 0.7))
+        # ★ 여기만 예전처럼 크게: (10, 6) 고정 ★
+        fig, ax = plt.subplots(figsize=(10, 6))
         labels = [f"{n} ({h}세대)" for n, h in zip(out_df["아파트명"], out_df["세대수"])]
         ax.barh(labels, out_df["선택일기준_누적입주율"])
         ax.set_xlabel("선택일 기준 누적 입주율")
@@ -913,7 +912,6 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
         },
     )
 
-    # 가로 넓게, 높이 줄이고 y라벨 작게
     fig, ax = plt.subplots(figsize=(13 * FIG_SCALE * 1.1, 5 * FIG_SCALE * 0.8))
     worst = out.head(top_n).copy()
     y_labels = [
