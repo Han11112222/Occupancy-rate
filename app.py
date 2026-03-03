@@ -1,5 +1,5 @@
 # app.py  ─ Streamlit (폰트 견고화 / 캐시초기화 / 최신 파일 자동선택 / TTL 캐시 / CSV다운로드
-#                    / 표 숫자 중앙정렬 / 그래프 라벨(현재?계획?부족) / "연도별 → 요약표" 순서로 배치)
+#                    / 표 숫자 중앙정렬 / 그래프 라벨(현재·계획·부족·초과) / "연도별 → 요약표" 순서로 배치)
 import os, logging, warnings, shutil, time, hashlib, io, glob
 from pathlib import Path
 
@@ -279,7 +279,7 @@ def _last_data_date_from_df(_df: pd.DataFrame) -> pd.Timestamp | None:
         return max(all_dates)
     return None
 
-# 기본 시작/종료일 (date_input용; 내부에서는 연?월만 사용)
+# 기본 시작/종료일 (date_input용; 내부에서는 연·월만 사용)
 _default_start = pd.Timestamp("2021-01-01").date()
 if df is not None and not df.empty:
     _last_ts = _last_data_date_from_df(df)
@@ -289,18 +289,18 @@ _default_end = (_last_ts.to_pydatetime().date()
                 if _last_ts is not None
                 else pd.Timestamp("2025-08-31").date())
 
-st.sidebar.markdown("#### 분석 기간(연?월 기준, 일자는 무시)")
+st.sidebar.markdown("#### 분석 기간(연·월 기준, 일자는 무시)")
 
 start_raw = st.sidebar.date_input(
-    "시작일 (연?월 기준, 일자는 무시)",
+    "시작일 (연·월 기준, 일자는 무시)",
     value=_default_start
 )
 end_raw = st.sidebar.date_input(
-    "종료일 (연?월 기준, 일자는 무시)",
+    "종료일 (연·월 기준, 일자는 무시)",
     value=_default_end
 )
 
-# 연?월만 사용해서 실제 계산용 시작/종료일 생성
+# 연·월만 사용해서 실제 계산용 시작/종료일 생성
 start_raw = pd.to_datetime(start_raw)
 end_raw = pd.to_datetime(end_raw)
 
@@ -312,7 +312,15 @@ if 시작일 > 종료일:
 
 # 나머지 사이드바 입력
 min_units = st.sidebar.number_input("세대수 하한(세대)", min_value=0, max_value=2000, step=50, value=300)
-run = st.sidebar.button("입주율 분석 실행", key="run_btn")
+
+# [수정] 세션 상태(session_state)를 활용하여 기존 버튼 UI 유지 및 리프레쉬 초기화 방지
+if "run_clicked" not in st.session_state:
+    st.session_state.run_clicked = False
+
+if st.sidebar.button("입주율 분석 실행", key="run_btn"):
+    st.session_state.run_clicked = True
+
+run = st.session_state.run_clicked
 
 # -------------------- 분석/시각화 --------------------
 def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
@@ -370,7 +378,7 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
     else:
         yearly = pd.DataFrame(columns=["입주시작연도","단지수","총세대수","총입주세대수","잔여세대수","누적입주율"])
 
-    st.markdown("#### 📌 연도별 누적 입주율(가중: 총입주세대수 ? 총세대수)")
+    st.markdown("#### 📌 연도별 누적 입주율(가중: 총입주세대수 ÷ 총세대수)")
     if not yearly.empty:
         cols = st.columns(len(yearly))
         for col, (_, row) in zip(cols, yearly.iterrows()):
@@ -453,7 +461,6 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
     cohort["입주시작연도"] = cohort["입주시작월"].dt.year
 
     rate_dict = {}
-    # [수정] 2/3 사이즈로 축소 (14, 12 -> 9.4, 8)
     fig = plt.figure(figsize=(9.4, 8), constrained_layout=False)
     gs = fig.add_gridspec(nrows=2, ncols=1, height_ratios=[3, 1.6])
     ax_plot = fig.add_subplot(gs[0]); ax_table = fig.add_subplot(gs[1]); ax_table.axis("off")
@@ -486,7 +493,6 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
     graph_raw_df = pd.DataFrame(rate_dict, index=idx_names)
 
     if has_data:
-        # [수정] 폰트 사이즈 약 30% 축소
         ax_plot.set_title(f"연도별 입주시작 단지의 월별 누적 입주율(세대수 ≥ {min_units})", fontsize=11)
         ax_plot.set_xlabel("입주경과 개월\n(해당 n개월 이상 경과 단지만 포함)", fontsize=9)
         ax_plot.set_ylabel("누적 평균 입주율", fontsize=9)
@@ -505,7 +511,6 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
                            colLabels=display_df.columns.tolist(),
                            cellLoc="center", loc="center")
         t.auto_set_font_size(False);
-        # [수정] 표 폰트 사이즈 축소 (11 -> 8)
         t.set_fontsize(8); t.scale(1.0, 1.7)
         plt.subplots_adjust(hspace=0.28)
         apply_korean_font(fig); st.pyplot(fig, use_container_width=True)
@@ -554,17 +559,14 @@ def recent2y_top_at_5m(end_date, top_n=10, min_units=0):
     )
 
     if not ranked.head(top_n).empty:
-        # [수정] 2/3 사이즈로 축소 (10, 6 -> 6.7, 4)
         fig, ax = plt.subplots(figsize=(6.7, 4))
         labels = [f"{n} ({h}세대)" for n, h in zip(ranked.head(top_n)["아파트명"], ranked.head(top_n)["세대수"])]
         ax.barh(labels, ranked.head(top_n)["입주율_5개월"])
-        # [수정] 폰트 사이즈 약 30% 축소
         ax.set_xlabel("입주시작 5개월차 입주율", fontsize=9);
         ax.set_title(f"최근 2년 — 5개월차 입주율 TOP (세대수 ≥ {min_units})", fontsize=11)
         ax.tick_params(axis='both', labelsize=8)
         ax.invert_yaxis(); ax.set_xlim(0, 1)
         for y, v in enumerate(ranked.head(top_n)["입주율_5개월"]):
-            # [수정] 텍스트 폰트 사이즈 축소
             ax.text(min(v + 0.01, 0.98), y, f"{v*100:.1f}%", va="center", fontsize=8)
         fig.tight_layout(); apply_korean_font(fig); st.pyplot(fig, use_container_width=True)
     return ranked
@@ -620,17 +622,14 @@ def cohort2025_progress(end_date, min_units=0, MAX_M=9):
     )
 
     if out_df["선택일기준_누적입주율"].notna().any():
-        # [수정] 2/3 사이즈로 축소 (10, 6 -> 6.7, 4)
         fig, ax = plt.subplots(figsize=(6.7, 4))
         labels = [f"{n} ({h}세대)" for n, h in zip(out_df["아파트명"], out_df["세대수"])]
         ax.barh(labels, out_df["선택일기준_누적입주율"])
-        # [수정] 폰트 사이즈 약 30% 축소
         ax.set_xlabel("선택일 기준 누적 입주율", fontsize=9);
         ax.set_title("2025년 입주시작 단지 — 선택일 기준 누적 입주율", fontsize=11)
         ax.tick_params(axis='both', labelsize=8)
         ax.invert_yaxis(); ax.set_xlim(0, 1)
         for y, v in enumerate(out_df["선택일기준_누적입주율"]):
-            # [수정] 텍스트 폰트 사이즈 축소
             if pd.notna(v): ax.text(min(v + 0.01, 0.98), y, f"{v*100:.1f}%", va="center", fontsize=8)
         fig.tight_layout(); apply_korean_font(fig); st.pyplot(fig, use_container_width=True)
     else:
@@ -646,7 +645,7 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
         & (df["세대수"] >= min_units)
     ].copy()
     if cohort.empty:
-        st.info("✅ 계획 대비 저조한 단지가 없어."); return pd.DataFrame()
+        st.info("✅ 대상 단지가 없어."); return pd.DataFrame()
 
     PLAN = {1: 9.29, 2: 43.25, 3: 62.75, 4: 72.61, 5: 78.17, 6: 81.56, 7: 84.28, 8: 86.07, 9: 87.86}
     PLAN = {k: min(1.0, v / 100) for k, v in PLAN.items()}
@@ -681,21 +680,44 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     cohort["계획누적세대(선택일)"] = (cohort["계획누적(선택일)"] * cohort["세대수"]).round().astype("Int64")
     cohort["현재_부족세대"] = (cohort["계획누적세대(선택일)"] - cohort["실제누적세대(선택일)"]).clip(lower=0).astype("Int64")
 
-    out = cohort[cohort["편차(pp)"] < 0].copy()
+    # --- 조회 대상 선택 라디오 버튼 ---
+    st.markdown("---")
+    view_mode = st.radio(
+        "📊 조회 대상 선택",
+        ["🚨 계획 대비 저조 단지", "🌟 계획 초과(우수) 단지", "전체 단지 보기"],
+        horizontal=True
+    )
+
+    if view_mode == "🚨 계획 대비 저조 단지":
+        out = cohort[cohort["편차(pp)"] < 0].copy()
+        sort_asc = True
+        title_prefix = "🚨 계획 대비 저조 단지"
+    elif view_mode == "🌟 계획 초과(우수) 단지":
+        out = cohort[cohort["편차(pp)"] >= 0].copy()
+        sort_asc = False  
+        title_prefix = "🌟 계획 초과(우수) 단지"
+    else:
+        out = cohort.copy()
+        sort_asc = False  
+        title_prefix = "📊 전체 단지 계획 대비 실적"
+
     if out.empty:
-        st.info("✅ 계획 대비 저조한 단지가 없어."); return pd.DataFrame()
+        st.info(f"✅ 조건에 맞는 단지가 없어. ({view_mode})"); return pd.DataFrame()
 
     out = out[
         ["아파트명","세대수","입주시작월","경과개월(선택일기준)",
          "실제누적세대(선택일)","계획누적세대(선택일)","현재_부족세대",
          "실제누적(선택일)","계획누적(선택일)","편차(pp)"]
-    ].sort_values(by="편차(pp)", ascending=True)
+    ].sort_values(by="편차(pp)", ascending=sort_asc)
 
-    disp = out.head(top_n).copy()
+    disp_limit = len(out) if view_mode == "전체 단지 보기" else top_n
+    
+    # [표 출력용 포맷팅 데이터]
+    disp = out.head(disp_limit).copy()
     disp["입주시작월"] = _fmt_date_str(disp["입주시작월"])
     disp = _format_pct_cols(disp, ["실제누적(선택일)", "계획누적(선택일)"])
 
-    st.subheader(f"🚨 계획 대비 저조 단지 (선택일 {end_date:%Y-%m-%d}, 세대수 ≥ {min_units}) — 상위 {top_n}개")
+    st.subheader(f"{title_prefix} (선택일 {end_date:%Y-%m-%d}, 세대수 ≥ {min_units}) — 상위 {len(disp)}개")
     st.dataframe(
         disp,
         use_container_width=True,
@@ -711,19 +733,22 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
         },
     )
 
-    # [수정] 2/3 사이즈로 축소 (13, 5 -> 8.7, 3.3)
-    fig, ax = plt.subplots(figsize=(8.7, 3.3))
-    worst = out.head(top_n).copy()
-    y_labels = [f"{n} ({h}세대) ? {m}개월차" for n, h, m in zip(worst["아파트명"], worst["세대수"], worst["경과개월(선택일기준)"])]
+    fig_height = max(3.3, len(disp) * 0.35)
+    fig, ax = plt.subplots(figsize=(8.7, fig_height))
+    
+    # [그래프용 원본 숫자 데이터]
+    worst = out.head(disp_limit).copy() 
+    
+    y_labels = [f"{n} ({h}세대) · {m}개월차" for n, h, m in zip(worst["아파트명"], worst["세대수"], worst["경과개월(선택일기준)"])]
+    
     ax.barh(y_labels, worst["계획누적세대(선택일)"], alpha=0.55, edgecolor="none", label="계획 누적 세대")
     ax.barh(y_labels, worst["실제누적세대(선택일)"], alpha=0.95, label="실제 누적 세대")
 
     x_max = max(worst["계획누적세대(선택일)"].max(skipna=True), worst["실제누적세대(선택일)"].max(skipna=True))
     ax.set_xlim(0, float(x_max) * 1.12)
 
-    # [수정] 폰트 사이즈 약 30% 축소
-    ax.set_xlabel("누적 세대수", fontsize=9);
-    ax.set_title("계획 대비 저조 단지 — 계획 vs 실적 누적 세대수", fontsize=11)
+    ax.set_xlabel("누적 세대수", fontsize=9)
+    ax.set_title(f"{title_prefix} — 계획 vs 실적 누적 세대수", fontsize=11)
     ax.tick_params(axis='both', labelsize=8)
     ax.legend(loc="lower right", ncol=2, fontsize=8)
 
@@ -734,21 +759,24 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
         worst["현재_부족세대"].fillna(0),
     )):
         a = int(a); p = int(p); lack = int(lack)
-        # [수정] 텍스트 폰트 사이즈 축소
         if a > 0: ax.text(a - pad_in, y, f"{a:,}세대", va="center", ha="right", fontsize=8)
         ax.text(p + pad_out, y, f"(계획 {p:,})", va="center", ha="left", color="gray", alpha=0.9, fontsize=8)
+        
         if p > a:
             mid = a + (p - a) / 2
             ax.text(mid, y, f"부족 {lack:,}세대", va="center", ha="center", color="crimson", fontweight="bold", alpha=0.95, fontsize=9)
+        elif a > p:
+            mid = p + (a - p) / 2
+            over = a - p
+            ax.text(mid, y, f"초과 {over:,}세대", va="center", ha="center", color="royalblue", fontweight="bold", alpha=0.95, fontsize=9)
 
     ax.invert_yaxis(); ax.grid(axis="x", alpha=0.3)
     fig.tight_layout(); apply_korean_font(fig); st.pyplot(fig, use_container_width=True)
 
-    # [수정] 2/3 사이즈로 축소 (9, 7 -> 6, 4.7)
     fig2, ax2 = plt.subplots(figsize=(6, 4.7))
     scatter_df = worst.dropna(subset=["계획누적(선택일)", "실제누적(선택일)", "편차(pp)"]).copy()
     if scatter_df.empty:
-        st.info("⚠️ 산포도에 표시할 값이 없어(계획/실제 누적 비율 NaN)."); return out
+        st.info("⚠️ 산포도에 표시할 값이 없어."); return out
     bubble_area = _bubble_area_from_units(scatter_df["세대수"], min_area=250, max_area=2800)
     sc = ax2.scatter(scatter_df["계획누적(선택일)"], scatter_df["실제누적(선택일)"],
                      s=bubble_area, c=scatter_df["편차(pp)"], alpha=0.9, edgecolors="k", linewidths=0.6)
@@ -757,18 +785,16 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     ymax = max(1.0, scatter_df["실제누적(선택일)"].max() * 1.05)
     ax2.set_xlim(0, min(1.0, xmax)); ax2.set_ylim(0, min(1.0, ymax))
 
-    # [수정] 폰트 사이즈 약 30% 축소
-    ax2.set_xlabel("계획 누적(비율)", fontsize=9);
-    ax2.set_ylabel("실제 누적(비율)", fontsize=9);
+    ax2.set_xlabel("계획 누적(비율)", fontsize=9)
+    ax2.set_ylabel("실제 누적(비율)", fontsize=9)
     ax2.set_title("계획 vs 실제 (버블=세대수, 색=편차)", fontsize=11)
     ax2.tick_params(axis='both', labelsize=8)
 
     cb = plt.colorbar(sc);
-    cb.set_label("편차(pp)", fontsize=9) # 컬러바 라벨 폰트 축소
-    cb.ax.tick_params(labelsize=8) # 컬러바 눈금 폰트 축소
+    cb.set_label("편차(pp)", fontsize=9) 
+    cb.ax.tick_params(labelsize=8) 
 
     for _, r in scatter_df.iterrows():
-        # [수정] 버블 텍스트 폰트 사이즈 축소 (10 -> 7)
         ax2.text(float(r["계획누적(선택일)"]) + 0.012, float(r["실제누적(선택일)"]) + 0.012, f"{str(r['아파트명'])}", fontsize=7, alpha=0.95)
     ax2.grid(alpha=0.3); fig2.tight_layout(); apply_korean_font(fig2); st.pyplot(fig2, use_container_width=True)
     return out
