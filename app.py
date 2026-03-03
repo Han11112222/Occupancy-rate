@@ -250,27 +250,38 @@ def _format_pct_cols(df_in, cols):
     return df
 
 # -------------------- 종료일 디폴트: 엑셀 내 가장 최신 날짜 찾기 --------------------
-# [수정됨] 엑셀의 모든 데이터를 스캔하여 가장 최신 날짜를 뽑아옵니다.
 def _last_data_date_from_df(_df: pd.DataFrame) -> pd.Timestamp | None:
     if _df is None or _df.empty:
         return None
 
-    max_date = None
+    priority_keywords = ["데이터", "기준", "마감", "컷오프", "cutoff", "집계", "최종", "마지막"]
+    priority_dates = []
+    generic_dates = []
+
     for col in _df.columns:
-        # 세대수 같은 숫자 데이터가 날짜로 오인되는 것을 방지
+        # 숫자형(세대수 등)이 날짜로 오인되는 것 방지
         if pd.api.types.is_numeric_dtype(_df[col]):
             continue
         try:
             s = pd.to_datetime(_df[col], errors="coerce").dropna()
-            if not s.empty:
-                c_max = s.max()
-                # 2000년도와 2100년도 사이의 유효한 날짜만 취급
-                if pd.Timestamp('2000-01-01') < c_max < pd.Timestamp('2100-01-01'):
-                    if max_date is None or c_max > max_date:
-                        max_date = c_max
+            # 비정상적인 미래/과거 날짜 필터링
+            s = s[(s >= pd.Timestamp('2000-01-01')) & (s <= pd.Timestamp('2100-01-01'))]
+            if s.empty:
+                continue
+
+            col_l = str(col).lower()
+            if any(k in col_l for k in priority_keywords):
+                priority_dates.append(s.max())
+            else:
+                generic_dates.append(s.max())
         except:
             pass
-    return max_date
+
+    if priority_dates:
+        return max(priority_dates)
+    elif generic_dates:
+        return max(generic_dates)
+    return None
 
 _default_start = pd.Timestamp("2021-01-01").date()
 
@@ -279,9 +290,11 @@ if df is not None and not df.empty:
 else:
     _last_ts = None
 
-_default_end = (_last_ts.to_pydatetime().date()
-                if _last_ts is not None
-                else pd.Timestamp.today().date())
+# [수정] 찾아낸 가장 최신 날짜가 속한 '월의 마지막 날'로 디폴트 세팅
+if _last_ts is not None:
+    _default_end = (_last_ts + pd.offsets.MonthEnd(0)).date()
+else:
+    _default_end = (pd.Timestamp.today() + pd.offsets.MonthEnd(0)).date()
 
 st.sidebar.markdown("#### 분석 기간(연·월 기준, 일자는 무시)")
 
@@ -565,7 +578,6 @@ def recent2y_top_at_5m(end_date, top_n=10, min_units=0):
         fig.tight_layout(); apply_korean_font(fig); st.pyplot(fig, use_container_width=True)
     return ranked
 
-# [수정됨] 2025년 이후 입주시작 단지로 범위 확장
 def cohort2025_progress(end_date, min_units=0, MAX_M=9):
     end_date = pd.to_datetime(end_date); month_cols = ensure_start_index(df)
     cohort = df[
@@ -633,11 +645,9 @@ def cohort2025_progress(end_date, min_units=0, MAX_M=9):
         st.info("⚠️ 선택일 기준 누적입주율을 계산할 수 있는 단지가 없어.")
     return out_df
 
-# [수정됨] 2025년 이후 입주시작 단지로 범위 확장
 def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     end_date = pd.to_datetime(end_date); month_cols = ensure_start_index(df)
     
-    # 여기서 2025-01-01부터 end_date까지 필터링되도록 변경
     cohort = df[
         (df["입주시작월"] >= pd.Timestamp("2025-01-01"))
         & (df["입주시작월"] <= end_date)
@@ -682,7 +692,6 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     cohort["계획누적세대(선택일)"] = (cohort["계획누적(선택일)"] * cohort["세대수"]).round().astype("Int64")
     cohort["현재_부족세대"] = (cohort["계획누적세대(선택일)"] - cohort["실제누적세대(선택일)"]).clip(lower=0).astype("Int64")
 
-    # --- 🚨 맨 하단 그래프 조회 대상 선택 활성화 버튼 ---
     st.markdown("---")
     view_mode = st.radio(
         "📊 조회 대상 선택",
@@ -715,7 +724,6 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
 
     disp_limit = len(out) if view_mode == "전체 단지 보기" else top_n
     
-    # [표 출력용 포맷팅 데이터]
     disp = out.head(disp_limit).copy()
     disp["입주시작월"] = _fmt_date_str(disp["입주시작월"])
     disp = _format_pct_cols(disp, ["실제누적(선택일)", "계획누적(선택일)"])
@@ -739,7 +747,6 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     fig_height = max(3.3, len(disp) * 0.35)
     fig, ax = plt.subplots(figsize=(8.7, fig_height))
     
-    # [그래프용 원본 숫자 데이터]
     worst = out.head(disp_limit).copy() 
     
     y_labels = [f"{n} ({h}세대) · {m}개월차" for n, h, m in zip(worst["아파트명"], worst["세대수"], worst["경과개월(선택일기준)"])]
