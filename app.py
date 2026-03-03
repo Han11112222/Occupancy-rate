@@ -313,7 +313,7 @@ if 시작일 > 종료일:
 # 나머지 사이드바 입력
 min_units = st.sidebar.number_input("세대수 하한(세대)", min_value=0, max_value=2000, step=50, value=300)
 
-# [수정] 세션 상태(session_state)를 활용하여 기존 버튼 UI 유지 및 리프레쉬 초기화 방지
+# [수정] 세션 기억(Session State)을 통해 원본 버튼 UI는 유지하면서 화면 리프레시는 막아줍니다.
 if "run_clicked" not in st.session_state:
     st.session_state.run_clicked = False
 
@@ -680,12 +680,13 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     cohort["계획누적세대(선택일)"] = (cohort["계획누적(선택일)"] * cohort["세대수"]).round().astype("Int64")
     cohort["현재_부족세대"] = (cohort["계획누적세대(선택일)"] - cohort["실제누적세대(선택일)"]).clip(lower=0).astype("Int64")
 
-    # --- 조회 대상 선택 라디오 버튼 ---
+    # --- 🚨 맨 하단 그래프 조회 대상 선택 활성화 버튼 (절대 지우지 않고 유지) 🚨 ---
     st.markdown("---")
     view_mode = st.radio(
         "📊 조회 대상 선택",
         ["🚨 계획 대비 저조 단지", "🌟 계획 초과(우수) 단지", "전체 단지 보기"],
-        horizontal=True
+        horizontal=True,
+        key="view_mode_radio"
     )
 
     if view_mode == "🚨 계획 대비 저조 단지":
