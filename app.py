@@ -290,7 +290,6 @@ if df is not None and not df.empty:
 else:
     _last_ts = None
 
-# [수정] 찾아낸 가장 최신 날짜가 속한 '월의 마지막 날'로 디폴트 세팅
 if _last_ts is not None:
     _default_end = (_last_ts + pd.offsets.MonthEnd(0)).date()
 else:
@@ -751,8 +750,10 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     
     y_labels = [f"{n} ({h}세대) · {m}개월차" for n, h, m in zip(worst["아파트명"], worst["세대수"], worst["경과개월(선택일기준)"])]
     
-    ax.barh(y_labels, worst["계획누적세대(선택일)"], alpha=0.55, edgecolor="none", label="계획 누적 세대")
-    ax.barh(y_labels, worst["실제누적세대(선택일)"], alpha=0.95, label="실제 누적 세대")
+    # [수정] 계획과 실적 막대의 두께(height)를 다르게 주어, 
+    # 실적이 계획을 초과하더라도 배경의 계획 막대가 가려지지 않게 불릿 차트(Bullet Chart) 형태로 개선
+    ax.barh(y_labels, worst["계획누적세대(선택일)"], height=0.7, color="tab:blue", alpha=0.55, edgecolor="none", label="계획 누적 세대")
+    ax.barh(y_labels, worst["실제누적세대(선택일)"], height=0.35, color="tab:orange", alpha=0.95, label="실제 누적 세대")
 
     x_max = max(worst["계획누적세대(선택일)"].max(skipna=True), worst["실제누적세대(선택일)"].max(skipna=True))
     ax.set_xlim(0, float(x_max) * 1.12)
