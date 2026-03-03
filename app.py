@@ -249,45 +249,39 @@ def _format_pct_cols(df_in, cols):
             df[c] = df[c].apply(lambda x: "" if pd.isna(x) else f"{x*100:.1f}%")
     return df
 
-# -------------------- 종료일 디폴트: 엑셀 내 가장 최신 날짜 --------------------
+# -------------------- 종료일 디폴트: 엑셀 내 가장 최신 날짜 찾기 --------------------
+# [수정됨] 엑셀의 모든 데이터를 스캔하여 가장 최신 날짜를 뽑아옵니다.
 def _last_data_date_from_df(_df: pd.DataFrame) -> pd.Timestamp | None:
     if _df is None or _df.empty:
         return None
 
-    priority_keywords = ["데이터", "기준", "마감", "컷오프", "cutoff", "집계", "최종", "마지막"]
-    priority_dates = []
-    generic_dates = []
-
+    max_date = None
     for col in _df.columns:
-        s = pd.to_datetime(_df[col], errors="coerce").dropna()
-        if s.empty:
+        # 세대수 같은 숫자 데이터가 날짜로 오인되는 것을 방지
+        if pd.api.types.is_numeric_dtype(_df[col]):
             continue
+        try:
+            s = pd.to_datetime(_df[col], errors="coerce").dropna()
+            if not s.empty:
+                c_max = s.max()
+                # 2000년도와 2100년도 사이의 유효한 날짜만 취급
+                if pd.Timestamp('2000-01-01') < c_max < pd.Timestamp('2100-01-01'):
+                    if max_date is None or c_max > max_date:
+                        max_date = c_max
+        except:
+            pass
+    return max_date
 
-        col_l = str(col).lower()
-        if any(k in col_l for k in priority_keywords):
-            priority_dates.append(s.max())
-        else:
-            generic_dates.append(s.max())
-
-    all_dates = []
-    if priority_dates:
-        all_dates.extend(priority_dates)
-    if generic_dates:
-        all_dates.extend(generic_dates)
-
-    if all_dates:
-        return max(all_dates)
-    return None
-
-# 기본 시작/종료일 (date_input용; 내부에서는 연·월만 사용)
 _default_start = pd.Timestamp("2021-01-01").date()
+
 if df is not None and not df.empty:
     _last_ts = _last_data_date_from_df(df)
 else:
     _last_ts = None
+
 _default_end = (_last_ts.to_pydatetime().date()
                 if _last_ts is not None
-                else pd.Timestamp("2025-08-31").date())
+                else pd.Timestamp.today().date())
 
 st.sidebar.markdown("#### 분석 기간(연·월 기준, 일자는 무시)")
 
@@ -313,7 +307,7 @@ if 시작일 > 종료일:
 # 나머지 사이드바 입력
 min_units = st.sidebar.number_input("세대수 하한(세대)", min_value=0, max_value=2000, step=50, value=300)
 
-# [수정] 세션 기억(Session State)을 통해 원본 버튼 UI는 유지하면서 화면 리프레시는 막아줍니다.
+# 세션 기억(Session State)을 통해 원본 버튼 UI는 유지하면서 화면 리프레시는 막아줍니다.
 if "run_clicked" not in st.session_state:
     st.session_state.run_clicked = False
 
@@ -571,16 +565,19 @@ def recent2y_top_at_5m(end_date, top_n=10, min_units=0):
         fig.tight_layout(); apply_korean_font(fig); st.pyplot(fig, use_container_width=True)
     return ranked
 
+# [수정됨] 2025년 이후 입주시작 단지로 범위 확장
 def cohort2025_progress(end_date, min_units=0, MAX_M=9):
     end_date = pd.to_datetime(end_date); month_cols = ensure_start_index(df)
     cohort = df[
-        (df["입주시작월"].dt.year == 2025)
+        (df["입주시작월"] >= pd.Timestamp("2025-01-01"))
+        & (df["입주시작월"] <= end_date)
         & (df["입주시작index"].notna())
         & (df["세대수"].notna())
         & (df["세대수"] >= min_units)
     ].copy()
+    
     if cohort.empty:
-        st.info("⚠️ 2025년 입주시작 단지(조건 충족)가 없어."); return pd.DataFrame()
+        st.info("⚠️ 2025년 이후 입주시작 단지(조건 충족)가 없어."); return pd.DataFrame()
 
     def cum_rate(row, m):
         idx = int(row["입주시작index"]); cols = month_cols[idx: idx + m]
@@ -610,7 +607,7 @@ def cohort2025_progress(end_date, min_units=0, MAX_M=9):
     disp["입주시작월"] = _fmt_date_str(disp["입주시작월"])
     disp = _format_pct_cols(disp, month_cols_out + ["선택일기준_누적입주율"])
 
-    st.subheader(f"📊 2025년 입주시작 단지 — 선택일({end_date:%Y-%m-%d}) 기준 누적 입주율 (세대수 ≥ {min_units})")
+    st.subheader(f"📊 2025년 이후 입주시작 단지 — 선택일({end_date:%Y-%m-%d}) 기준 누적 입주율 (세대수 ≥ {min_units})")
     st.dataframe(
         disp,
         use_container_width=True,
@@ -626,7 +623,7 @@ def cohort2025_progress(end_date, min_units=0, MAX_M=9):
         labels = [f"{n} ({h}세대)" for n, h in zip(out_df["아파트명"], out_df["세대수"])]
         ax.barh(labels, out_df["선택일기준_누적입주율"])
         ax.set_xlabel("선택일 기준 누적 입주율", fontsize=9);
-        ax.set_title("2025년 입주시작 단지 — 선택일 기준 누적 입주율", fontsize=11)
+        ax.set_title("2025년 이후 입주시작 단지 — 선택일 기준 누적 입주율", fontsize=11)
         ax.tick_params(axis='both', labelsize=8)
         ax.invert_yaxis(); ax.set_xlim(0, 1)
         for y, v in enumerate(out_df["선택일기준_누적입주율"]):
@@ -636,14 +633,19 @@ def cohort2025_progress(end_date, min_units=0, MAX_M=9):
         st.info("⚠️ 선택일 기준 누적입주율을 계산할 수 있는 단지가 없어.")
     return out_df
 
+# [수정됨] 2025년 이후 입주시작 단지로 범위 확장
 def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     end_date = pd.to_datetime(end_date); month_cols = ensure_start_index(df)
+    
+    # 여기서 2025-01-01부터 end_date까지 필터링되도록 변경
     cohort = df[
-        (df["입주시작월"].dt.year == 2025)
+        (df["입주시작월"] >= pd.Timestamp("2025-01-01"))
+        & (df["입주시작월"] <= end_date)
         & (df["입주시작index"].notna())
         & (df["세대수"].notna())
         & (df["세대수"] >= min_units)
     ].copy()
+    
     if cohort.empty:
         st.info("✅ 대상 단지가 없어."); return pd.DataFrame()
 
@@ -680,7 +682,7 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     cohort["계획누적세대(선택일)"] = (cohort["계획누적(선택일)"] * cohort["세대수"]).round().astype("Int64")
     cohort["현재_부족세대"] = (cohort["계획누적세대(선택일)"] - cohort["실제누적세대(선택일)"]).clip(lower=0).astype("Int64")
 
-    # --- 🚨 맨 하단 그래프 조회 대상 선택 활성화 버튼 (절대 지우지 않고 유지) 🚨 ---
+    # --- 🚨 맨 하단 그래프 조회 대상 선택 활성화 버튼 ---
     st.markdown("---")
     view_mode = st.radio(
         "📊 조회 대상 선택",
@@ -692,15 +694,15 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     if view_mode == "🚨 계획 대비 저조 단지":
         out = cohort[cohort["편차(pp)"] < 0].copy()
         sort_asc = True
-        title_prefix = "🚨 계획 대비 저조 단지"
+        title_prefix = "🚨 2025년 이후 계획 대비 저조 단지"
     elif view_mode == "🌟 계획 초과(우수) 단지":
         out = cohort[cohort["편차(pp)"] >= 0].copy()
         sort_asc = False  
-        title_prefix = "🌟 계획 초과(우수) 단지"
+        title_prefix = "🌟 2025년 이후 계획 초과(우수) 단지"
     else:
         out = cohort.copy()
         sort_asc = False  
-        title_prefix = "📊 전체 단지 계획 대비 실적"
+        title_prefix = "📊 2025년 이후 전체 단지 계획 대비 실적"
 
     if out.empty:
         st.info(f"✅ 조건에 맞는 단지가 없어. ({view_mode})"); return pd.DataFrame()
