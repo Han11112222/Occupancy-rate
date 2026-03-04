@@ -462,10 +462,6 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
 
     return result_df
 
-
-# -------------------------------------------------------------------------
-# 1번 사진: 동적 선 그래프 + 하단 표 서브플롯 (글자 크기 10pt 내외로 확대)
-# -------------------------------------------------------------------------
 def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
     month_cols = ensure_start_index(df)
     MAX_M = 9
@@ -536,7 +532,6 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
         header_values = [""] + list(display_df.columns)
         cell_values = [display_df.index.tolist()] + [display_df[c].tolist() for c in display_df.columns]
 
-        # [수정된 부분] 헤더와 셀 폰트 크기를 키우고, 그에 맞춰 셀 높이를 여유 있게 늘림
         fig.add_trace(
             go.Table(
                 header=dict(values=header_values, fill_color='lightgray', align='center', font=dict(size=13, color='black')),
@@ -549,7 +544,7 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
             title=f"연도별 입주시작 단지의 월별 누적 입주율(세대수 ≥ {min_units})",
             hovermode="x unified",
             margin=dict(l=40, r=40, t=50, b=10),
-            height=700  # 커진 폰트에 맞게 전체 그래프 높이를 살짝 키움
+            height=700  
         )
         
         fig.update_yaxes(title_text="누적 평균 입주율", range=[0, 1], tickformat=".1%", row=1, col=1)
@@ -559,9 +554,6 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
     else:
         st.info("⚠️ 표시할 연도별 입주율 데이터가 없어.")
 
-# -------------------------------------------------------------------------
-# 2번 사진: 활성화(토글) 버튼과 함께 약 30% 축소된 정적 막대 그래프 
-# -------------------------------------------------------------------------
 def recent2y_top_at_5m(end_date, top_n=10, min_units=0):
     end_date = pd.to_datetime(end_date); month_cols = ensure_start_index(df)
     start_cal = pd.Timestamp(year=end_date.year - 1, month=1, day=1)
@@ -618,9 +610,6 @@ def recent2y_top_at_5m(end_date, top_n=10, min_units=0):
             
     return ranked
 
-# -------------------------------------------------------------------------
-# [수정된 부분] 4번 사진: 활성화(토글) 버튼을 누르면 보이도록 수정
-# -------------------------------------------------------------------------
 def cohort2025_progress(end_date, min_units=0, MAX_M=9):
     end_date = pd.to_datetime(end_date); month_cols = ensure_start_index(df)
     cohort = df[
@@ -673,7 +662,6 @@ def cohort2025_progress(end_date, min_units=0, MAX_M=9):
         },
     )
 
-    # 토글을 누르면 그래프가 나오도록 수정
     if out_df["선택일기준_누적입주율"].notna().any():
         if st.toggle("📊 2025년 이후 입주시작 단지 누적 입주율 차트 보기", value=False):
             fig, ax = plt.subplots(figsize=(6.7, 4))
@@ -690,9 +678,6 @@ def cohort2025_progress(end_date, min_units=0, MAX_M=9):
         st.info("⚠️ 선택일 기준 누적입주율을 계산할 수 있는 단지가 없어.")
     return out_df
 
-# -------------------------------------------------------------------------
-# 3번 사진: 아파트명이 함께 보이는 기존 정적 산포도 그래프
-# -------------------------------------------------------------------------
 def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     end_date = pd.to_datetime(end_date); month_cols = ensure_start_index(df)
     
@@ -870,7 +855,8 @@ with col1:
         pass
 
 with col2:
-    st.title("입주율 분석 대시보드")
+    # [수정된 부분] 타이틀 앞에 귀여운 🏡 아이콘 추가
+    st.title("🏡 입주율 분석 대시보드")
 
 st.markdown("##### ✨ Prepared by 마케팅본부 마케팅기획팀")
 st.markdown("---") 
@@ -878,14 +864,24 @@ st.markdown("---")
 if chosen_font: st.caption(f"한글 폰트 적용: {chosen_font}")
 st.caption(f"{data_caption} | code_ver={CODE_VER}")
 
+# [수정된 부분] 대시보드 출력 순서 재배치
 if run:
     if df.empty:
         st.error("데이터를 먼저 불러와 주세요.")
     else:
+        # 1 & 2. 연도별 누적 입주율 & 입주현황 요약표
         analyze_occupancy_by_period(시작일, 종료일, min_units=min_units)
-        plot_yearly_avg_occupancy_with_plan(시작일, 종료일, min_units=min_units)
-        recent2y_top_at_5m(종료일, top_n=10, min_units=min_units)
-        cohort2025_progress(종료일, min_units=min_units, MAX_M=9)
+        
+        # 3. 조회 대상 선택 (계획 대비 저조 단지 등)
         underperformers_vs_plan(종료일, min_units=min_units, MAX_M=9, top_n=15)
+        
+        # 4. 연도별 입주시작 단지의 월별 누적 입주율 (그래프, 표)
+        plot_yearly_avg_occupancy_with_plan(시작일, 종료일, min_units=min_units)
+        
+        # 5. 최근 2년 — 5개월차 입주율 TOP 10 (+활성화 버튼)
+        recent2y_top_at_5m(종료일, top_n=10, min_units=min_units)
+        
+        # 6. 2025년 이후 입주시작 단지 (+활성화 버튼)
+        cohort2025_progress(종료일, min_units=min_units, MAX_M=9)
 else:
     st.info("왼쪽 사이드바에서 옵션을 설정하고 **입주율 분석 실행**을 눌러줘.")
