@@ -272,12 +272,10 @@ def _last_data_date_from_df(_df: pd.DataFrame) -> pd.Timestamp | None:
     generic_dates = []
 
     for col in _df.columns:
-        # 숫자형(세대수 등)이 날짜로 오인되는 것 방지
         if pd.api.types.is_numeric_dtype(_df[col]):
             continue
         try:
             s = pd.to_datetime(_df[col], errors="coerce").dropna()
-            # 비정상적인 미래/과거 날짜 필터링
             s = s[(s >= pd.Timestamp('2000-01-01')) & (s <= pd.Timestamp('2100-01-01'))]
             if s.empty:
                 continue
@@ -426,11 +424,12 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
 
     st.markdown("---")
 
+    # [수정포인트] 공급승인일자 최신순 정렬 (ascending=False)
     result_df = (
         base[["아파트명","공급승인일자","세대수","입주시작월",
               "입주세대수","잔여세대수","입주기간(개월)","입주율"]]
         .dropna(subset=["입주세대수"])
-        .sort_values(by="공급승인일자", ascending=True)
+        .sort_values(by="공급승인일자", ascending=False)
         .copy()
     )
 
@@ -462,6 +461,9 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
 
     return result_df
 
+# -------------------------------------------------------------------------
+# [수정포인트] 제목 크기 확대 및 귀여운 이모티콘(📈) 추가
+# -------------------------------------------------------------------------
 def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
     month_cols = ensure_start_index(df)
     MAX_M = 9
@@ -522,6 +524,9 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
     graph_raw_df = pd.DataFrame(rate_dict, index=idx_names)
 
     if has_data:
+        # 소제목 스타일로 변경
+        st.subheader("📈 연도별 입주시작 단지의 월별 누적 입주율")
+
         table_df = graph_raw_df.T.copy()
         plan_row = pd.DataFrame([plan_y], index=["사업계획 기준"], columns=table_df.columns)
         table_df = pd.concat([table_df, plan_row], axis=0)
@@ -541,9 +546,9 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
         )
 
         fig.update_layout(
-            title=f"연도별 입주시작 단지의 월별 누적 입주율(세대수 ≥ {min_units})",
+            title=None, # 차트 내부 제목 제거
             hovermode="x unified",
-            margin=dict(l=40, r=40, t=50, b=10),
+            margin=dict(l=40, r=40, t=20, b=10),
             height=700  
         )
         
@@ -855,7 +860,6 @@ with col1:
         pass
 
 with col2:
-    # [수정된 부분] 타이틀 앞에 귀여운 🏡 아이콘 추가
     st.title("🏡 입주율 분석 대시보드")
 
 st.markdown("##### ✨ Prepared by 마케팅본부 마케팅기획팀")
@@ -864,7 +868,6 @@ st.markdown("---")
 if chosen_font: st.caption(f"한글 폰트 적용: {chosen_font}")
 st.caption(f"{data_caption} | code_ver={CODE_VER}")
 
-# [수정된 부분] 대시보드 출력 순서 재배치
 if run:
     if df.empty:
         st.error("데이터를 먼저 불러와 주세요.")
