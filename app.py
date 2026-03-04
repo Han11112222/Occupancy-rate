@@ -120,7 +120,8 @@ try:
 except Exception:
     pass
 
-st.sidebar.markdown("**🏢 마케팅본부 마케팅기획팀**")
+# [수정된 부분] 사이드바 소속명 수정
+st.sidebar.markdown("**🏢 마케팅본부 마케팅팀**")
 st.sidebar.divider() 
 
 st.sidebar.markdown("### 데이터 / 필터")
@@ -424,7 +425,6 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
 
     st.markdown("---")
 
-    # [수정포인트] 공급승인일자 최신순 정렬 (ascending=False)
     result_df = (
         base[["아파트명","공급승인일자","세대수","입주시작월",
               "입주세대수","잔여세대수","입주기간(개월)","입주율"]]
@@ -461,9 +461,6 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
 
     return result_df
 
-# -------------------------------------------------------------------------
-# [수정포인트] 제목 크기 확대 및 귀여운 이모티콘(📈) 추가
-# -------------------------------------------------------------------------
 def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
     month_cols = ensure_start_index(df)
     MAX_M = 9
@@ -524,7 +521,6 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
     graph_raw_df = pd.DataFrame(rate_dict, index=idx_names)
 
     if has_data:
-        # 소제목 스타일로 변경
         st.subheader("📈 연도별 입주시작 단지의 월별 누적 입주율")
 
         table_df = graph_raw_df.T.copy()
@@ -546,7 +542,7 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
         )
 
         fig.update_layout(
-            title=None, # 차트 내부 제목 제거
+            title=None, 
             hovermode="x unified",
             margin=dict(l=40, r=40, t=20, b=10),
             height=700  
@@ -862,7 +858,7 @@ with col1:
 with col2:
     st.title("🏡 입주율 분석 대시보드")
 
-st.markdown("##### ✨ Prepared by 마케팅본부 마케팅기획팀")
+st.markdown("##### ✨ Prepared by 마케팅본부 마케팅팀")
 st.markdown("---") 
 
 if chosen_font: st.caption(f"한글 폰트 적용: {chosen_font}")
