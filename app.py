@@ -464,7 +464,7 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
 
 
 # -------------------------------------------------------------------------
-# [수정포인트 1] 1번 사진: 동적 선 그래프 + 하단에 '표'가 하나로 묶여서 작게 나오도록 서브플롯 구성
+# 1번 사진: 동적 선 그래프 + 하단 표 서브플롯 (글자 크기 10pt 내외로 확대)
 # -------------------------------------------------------------------------
 def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
     month_cols = ensure_start_index(df)
@@ -482,7 +482,6 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
     rate_dict = {}
     has_data = False
     
-    # 그래프와 표가 위아래로 이어지게 레이아웃 분할 (위 그래프 75%, 아래 표 25%)
     fig = make_subplots(
         rows=2, cols=1,
         vertical_spacing=0.15,
@@ -508,7 +507,6 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
         if any(pd.notna(r) and r > 0 for r in rates): has_data = True
         rate_dict[y] = rates
         
-        # 선 그래프 라인 추가
         fig.add_trace(
             go.Scatter(x=[f"{i}개월" for i in range(1, MAX_M + 1)], y=rates, mode='lines+markers', name=f"{y}년"),
             row=1, col=1
@@ -519,7 +517,6 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
     plan_x_str = [f"{i}개월" for i in plan_x]
     plan_y = [min(1.0, PLAN[i] / 100) for i in plan_x]
     
-    # 사업계획 기준 점선 추가
     fig.add_trace(
         go.Scatter(x=plan_x_str, y=plan_y, mode='lines+markers', name="사업계획 기준", line=dict(dash='dash', color='magenta')),
         row=1, col=1
@@ -536,15 +533,14 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
         def _fmt_pct(x): return "" if pd.isna(x) else f"{x*100:.1f}%"
         display_df = table_df.applymap(_fmt_pct)
         
-        # 표 데이터 세팅
         header_values = [""] + list(display_df.columns)
         cell_values = [display_df.index.tolist()] + [display_df[c].tolist() for c in display_df.columns]
 
-        # 30% 작은 사이즈로 표(Table) 서브플롯 추가
+        # [수정된 부분] 헤더와 셀 폰트 크기를 키우고, 그에 맞춰 셀 높이를 여유 있게 늘림
         fig.add_trace(
             go.Table(
-                header=dict(values=header_values, fill_color='lightgray', align='center', font=dict(size=11, color='black')),
-                cells=dict(values=cell_values, fill_color='white', align='center', font=dict(size=10, color='black'), height=22)
+                header=dict(values=header_values, fill_color='lightgray', align='center', font=dict(size=13, color='black')),
+                cells=dict(values=cell_values, fill_color='white', align='center', font=dict(size=12, color='black'), height=28)
             ),
             row=2, col=1
         )
@@ -553,7 +549,7 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
             title=f"연도별 입주시작 단지의 월별 누적 입주율(세대수 ≥ {min_units})",
             hovermode="x unified",
             margin=dict(l=40, r=40, t=50, b=10),
-            height=650  # 그래프와 표가 한눈에 보이게 전체 높이 조정
+            height=700  # 커진 폰트에 맞게 전체 그래프 높이를 살짝 키움
         )
         
         fig.update_yaxes(title_text="누적 평균 입주율", range=[0, 1], tickformat=".1%", row=1, col=1)
@@ -609,7 +605,7 @@ def recent2y_top_at_5m(end_date, top_n=10, min_units=0):
 
     if not ranked.head(top_n).empty:
         if st.toggle("📊 최근 2년 — 5개월차 입주율 차트 보기", value=False):
-            fig, ax = plt.subplots(figsize=(4.7, 2.8)) # 30% 축소된 사이즈
+            fig, ax = plt.subplots(figsize=(4.7, 2.8))
             labels = [f"{n} ({h}세대)" for n, h in zip(ranked.head(top_n)["아파트명"], ranked.head(top_n)["세대수"])]
             ax.barh(labels, ranked.head(top_n)["입주율_5개월"])
             ax.set_xlabel("입주시작 5개월차 입주율", fontsize=8);
@@ -622,6 +618,9 @@ def recent2y_top_at_5m(end_date, top_n=10, min_units=0):
             
     return ranked
 
+# -------------------------------------------------------------------------
+# [수정된 부분] 4번 사진: 활성화(토글) 버튼을 누르면 보이도록 수정
+# -------------------------------------------------------------------------
 def cohort2025_progress(end_date, min_units=0, MAX_M=9):
     end_date = pd.to_datetime(end_date); month_cols = ensure_start_index(df)
     cohort = df[
@@ -674,23 +673,25 @@ def cohort2025_progress(end_date, min_units=0, MAX_M=9):
         },
     )
 
+    # 토글을 누르면 그래프가 나오도록 수정
     if out_df["선택일기준_누적입주율"].notna().any():
-        fig, ax = plt.subplots(figsize=(6.7, 4))
-        labels = [f"{n} ({h}세대)" for n, h in zip(out_df["아파트명"], out_df["세대수"])]
-        ax.barh(labels, out_df["선택일기준_누적입주율"])
-        ax.set_xlabel("선택일 기준 누적 입주율", fontsize=9);
-        ax.set_title("2025년 이후 입주시작 단지 — 선택일 기준 누적 입주율", fontsize=11)
-        ax.tick_params(axis='both', labelsize=8)
-        ax.invert_yaxis(); ax.set_xlim(0, 1)
-        for y, v in enumerate(out_df["선택일기준_누적입주율"]):
-            if pd.notna(v): ax.text(min(v + 0.01, 0.98), y, f"{v*100:.1f}%", va="center", fontsize=8)
-        fig.tight_layout(); apply_korean_font(fig); st.pyplot(fig, use_container_width=True)
+        if st.toggle("📊 2025년 이후 입주시작 단지 누적 입주율 차트 보기", value=False):
+            fig, ax = plt.subplots(figsize=(6.7, 4))
+            labels = [f"{n} ({h}세대)" for n, h in zip(out_df["아파트명"], out_df["세대수"])]
+            ax.barh(labels, out_df["선택일기준_누적입주율"])
+            ax.set_xlabel("선택일 기준 누적 입주율", fontsize=9);
+            ax.set_title("2025년 이후 입주시작 단지 — 선택일 기준 누적 입주율", fontsize=11)
+            ax.tick_params(axis='both', labelsize=8)
+            ax.invert_yaxis(); ax.set_xlim(0, 1)
+            for y, v in enumerate(out_df["선택일기준_누적입주율"]):
+                if pd.notna(v): ax.text(min(v + 0.01, 0.98), y, f"{v*100:.1f}%", va="center", fontsize=8)
+            fig.tight_layout(); apply_korean_font(fig); st.pyplot(fig, use_container_width=True)
     else:
         st.info("⚠️ 선택일 기준 누적입주율을 계산할 수 있는 단지가 없어.")
     return out_df
 
 # -------------------------------------------------------------------------
-# [수정포인트 2] 3번 사진: 아파트명이 함께 보이는 기존 정적 산포도 그래프로 완벽 복구
+# 3번 사진: 아파트명이 함께 보이는 기존 정적 산포도 그래프
 # -------------------------------------------------------------------------
 def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     end_date = pd.to_datetime(end_date); month_cols = ensure_start_index(df)
@@ -833,7 +834,6 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     ax.invert_yaxis(); ax.grid(axis="x", alpha=0.3)
     fig.tight_layout(); apply_korean_font(fig); st.pyplot(fig, use_container_width=True)
 
-    # 기존 Matplotlib 기반의 산포도 그래프 코드로 완전 원복
     fig2, ax2 = plt.subplots(figsize=(6, 4.7))
     scatter_df = worst.dropna(subset=["계획누적(선택일)", "실제누적(선택일)", "편차(pp)"]).copy()
     if scatter_df.empty:
@@ -872,7 +872,7 @@ with col1:
 with col2:
     st.title("입주율 분석 대시보드")
 
-st.markdown("##### ✨ Prepared by 마케팅본부 마케팅팀")
+st.markdown("##### ✨ Prepared by 마케팅본부 마케팅기획팀")
 st.markdown("---") 
 
 if chosen_font: st.caption(f"한글 폰트 적용: {chosen_font}")
