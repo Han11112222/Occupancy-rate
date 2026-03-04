@@ -844,7 +844,7 @@ with col1:
 with col2:
     st.title("입주율 분석 대시보드")
 
-st.markdown("##### ✨ Prepared by 마케팅본부 마케팅기획팀")
+st.markdown("##### ✨ Prepared by 마케팅본부 마케팅팀")
 st.markdown("---") # 시각적 안정감을 위한 선 추가
 
 if chosen_font: st.caption(f"한글 폰트 적용: {chosen_font}")
