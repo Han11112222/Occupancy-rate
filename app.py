@@ -756,30 +756,41 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     ax.barh(y_labels, worst["실제누적세대(선택일)"], height=0.35, color="tab:orange", alpha=0.95, label="실제 누적 세대")
 
     x_max = max(worst["계획누적세대(선택일)"].max(skipna=True), worst["실제누적세대(선택일)"].max(skipna=True))
-    ax.set_xlim(0, float(x_max) * 1.12)
+    
+    # [수정된 부분] 텍스트가 우측으로 길어지므로 잘리지 않게 x축 여백을 1.12에서 1.35로 늘렸습니다.
+    ax.set_xlim(0, float(x_max) * 1.35)
 
     ax.set_xlabel("누적 세대수", fontsize=9)
     ax.set_title(f"{title_prefix} — 계획 vs 실적 누적 세대수", fontsize=11)
     ax.tick_params(axis='both', labelsize=8)
     ax.legend(loc="lower right", ncol=2, fontsize=8)
 
-    pad_in = max(5, x_max * 0.01); pad_out = max(8, x_max * 0.015)
+    # [수정된 부분] 겹치던 텍스트들을 하나의 문자열로 묶어서 가장 긴 막대 우측에 배치합니다.
+    pad_out = max(8, x_max * 0.015)
     for y, (a, p, lack) in enumerate(zip(
         worst["실제누적세대(선택일)"].fillna(0),
         worst["계획누적세대(선택일)"].fillna(0),
         worst["현재_부족세대"].fillna(0),
     )):
         a = int(a); p = int(p); lack = int(lack)
-        if a > 0: ax.text(a - pad_in, y, f"{a:,}세대", va="center", ha="right", fontsize=8)
-        ax.text(p + pad_out, y, f"(계획 {p:,})", va="center", ha="left", color="gray", alpha=0.9, fontsize=8)
         
+        # 초과/부족 상태 문자열 생성
         if p > a:
-            mid = a + (p - a) / 2
-            ax.text(mid, y, f"부족 {lack:,}세대", va="center", ha="center", color="crimson", fontweight="bold", alpha=0.95, fontsize=9)
+            diff_str = f"부족 {lack:,}"
         elif a > p:
-            mid = p + (a - p) / 2
             over = a - p
-            ax.text(mid, y, f"초과 {over:,}세대", va="center", ha="center", color="royalblue", fontweight="bold", alpha=0.95, fontsize=9)
+            diff_str = f"초과 {over:,}"
+        else:
+            diff_str = "계획 달성"
+
+        # 막대(실적과 계획 중 더 큰 값)의 끝부분 좌표 계산
+        pos_x = max(a, p) + pad_out
+        
+        # 최종 출력할 단일 텍스트 포맷팅
+        text_str = f"{a:,}세대 (계획 {p:,} | {diff_str})"
+
+        # 텍스트 그리기
+        ax.text(pos_x, y, text_str, va="center", ha="left", fontsize=9, alpha=0.9)
 
     ax.invert_yaxis(); ax.grid(axis="x", alpha=0.3)
     fig.tight_layout(); apply_korean_font(fig); st.pyplot(fig, use_container_width=True)
