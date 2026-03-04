@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
 import streamlit as st
 
-# [추가된 부분] 동적 그래프를 위한 Plotly 임포트
+# 동적 그래프를 위한 Plotly 임포트
 import plotly.graph_objects as go
 import plotly.express as px
 
@@ -114,13 +114,13 @@ def inject_centered_style():
 inject_centered_style()
 
 # -------------------- 사이드바 --------------------
-# [추가된 부분] 로고 이미지와 부서명 강조
+# 로고 이미지와 부서명 강조
 try:
     st.sidebar.image("logo.png", use_container_width=True) 
 except Exception:
     pass # 파일이 없어도 에러 방지
 
-st.sidebar.markdown("**🏢 마케팅본부 마케팅기획팀**")
+st.sidebar.markdown("**🏢 마케팅본부 마케팅팀**")
 st.sidebar.divider() # 시각적 구분선 추가
 
 st.sidebar.markdown("### 데이터 / 필터")
@@ -466,7 +466,7 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
 
     return result_df
 
-# [수정된 부분 1] 연도별 그래프 동적화 (Plotly) 및 하단 표 30% 축소
+# 연도별 그래프 동적화 (Plotly) 및 하단 표 복구 & 30% 축소
 def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
     month_cols = ensure_start_index(df)
     MAX_M = 9
@@ -543,7 +543,7 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
         def _fmt_pct(x): return "" if pd.isna(x) else f"{x*100:.1f}%"
         display_df = table_df.applymap(_fmt_pct)
         
-        # 30% 축소된 미니 HTML 테이블 출력
+        # 하단 표 복구 및 30% 축소된 미니 HTML 테이블 출력
         html_table = display_df.to_html(classes="small-table", justify="center")
         st.markdown(
             f"""
@@ -560,7 +560,7 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
     else:
         st.info("⚠️ 표시할 연도별 입주율 데이터가 없어.")
 
-# [수정된 부분 2] 2번 사진 (TOP 10) 활성화 버튼 및 그래프 크기 축소 적용
+# 2번 사진 (TOP 10) 정적 그래프로 원복 및 활성화 버튼 유지
 def recent2y_top_at_5m(end_date, top_n=10, min_units=0):
     end_date = pd.to_datetime(end_date); month_cols = ensure_start_index(df)
     start_cal = pd.Timestamp(year=end_date.year - 1, month=1, day=1)
@@ -602,10 +602,10 @@ def recent2y_top_at_5m(end_date, top_n=10, min_units=0):
         }
     )
 
-    # 활성화 버튼 (토글) 구현
+    # 활성화 버튼 (토글) 유지
     if not ranked.head(top_n).empty:
         if st.toggle("📊 최근 2년 — 5개월차 입주율 차트 보기", value=False):
-            # 원본 figsize=(6.7, 4)에서 약 30% 축소된 (4.7, 2.8) 적용 및 폰트 사이즈 조정
+            # 정적 그래프로 원복, figsize 축소 및 폰트 사이즈 조정 적용
             fig, ax = plt.subplots(figsize=(4.7, 2.8))
             labels = [f"{n} ({h}세대)" for n, h in zip(ranked.head(top_n)["아파트명"], ranked.head(top_n)["세대수"])]
             ax.barh(labels, ranked.head(top_n)["입주율_5개월"])
@@ -686,7 +686,7 @@ def cohort2025_progress(end_date, min_units=0, MAX_M=9):
         st.info("⚠️ 선택일 기준 누적입주율을 계산할 수 있는 단지가 없어.")
     return out_df
 
-# [수정된 부분 3] 3번 사진 산포도 디자인 유지 및 동적 그래프(Plotly) 변환
+# 디자인 유지 및 동적 그래프(Plotly) 변환 유지
 def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     end_date = pd.to_datetime(end_date); month_cols = ensure_start_index(df)
     
@@ -828,7 +828,6 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     ax.invert_yaxis(); ax.grid(axis="x", alpha=0.3)
     fig.tight_layout(); apply_korean_font(fig); st.pyplot(fig, use_container_width=True)
 
-    # 여기부터가 3번 사진 (동적 산포도 변환) 부분입니다.
     scatter_df = worst.dropna(subset=["계획누적(선택일)", "실제누적(선택일)", "편차(pp)"]).copy()
     if scatter_df.empty:
         st.info("⚠️ 산포도에 표시할 값이 없어."); return out
@@ -854,7 +853,6 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
         title="계획 vs 실제 (버블=세대수, 색=편차)"
     )
     
-    # y=x 대각선 추가 (계획 달성 기준선)
     fig2.add_shape(type="line", x0=0, y0=0, x1=1, y1=1, line=dict(dash="dash", color="gray"))
     
     fig2.update_layout(
@@ -869,7 +867,7 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     return out
 
 # -------------------- 실행 --------------------
-# [추가된 부분] 메인 타이틀 옆에 로고와 제작 부서 텍스트 추가
+# 메인 타이틀 옆에 로고와 제작 부서 텍스트 추가
 col1, col2 = st.columns([1, 15]) # 화면 분할
 
 with col1:
