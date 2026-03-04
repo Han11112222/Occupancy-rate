@@ -110,6 +110,15 @@ def inject_centered_style():
 inject_centered_style()
 
 # -------------------- 사이드바 --------------------
+# [추가된 부분] 로고 이미지와 부서명 강조
+try:
+    st.sidebar.image("logo.png", use_container_width=True) 
+except Exception:
+    pass # 파일이 없어도 에러 방지
+
+st.sidebar.markdown("**🏢 마케팅본부 마케팅기획팀**")
+st.sidebar.divider() # 시각적 구분선 추가
+
 st.sidebar.markdown("### 데이터 / 필터")
 load_way = st.sidebar.radio("데이터 불러오기 방식", ["Repo 내 파일 사용", "파일 업로드"], index=0)
 
@@ -750,14 +759,14 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     
     y_labels = [f"{n} ({h}세대) · {m}개월차" for n, h, m in zip(worst["아파트명"], worst["세대수"], worst["경과개월(선택일기준)"])]
     
-    # [수정] 계획과 실적 막대의 두께(height)를 다르게 주어, 
+    # 계획과 실적 막대의 두께(height)를 다르게 주어, 
     # 실적이 계획을 초과하더라도 배경의 계획 막대가 가려지지 않게 불릿 차트(Bullet Chart) 형태로 개선
     ax.barh(y_labels, worst["계획누적세대(선택일)"], height=0.7, color="tab:blue", alpha=0.55, edgecolor="none", label="계획 누적 세대")
     ax.barh(y_labels, worst["실제누적세대(선택일)"], height=0.35, color="tab:orange", alpha=0.95, label="실제 누적 세대")
 
     x_max = max(worst["계획누적세대(선택일)"].max(skipna=True), worst["실제누적세대(선택일)"].max(skipna=True))
     
-    # [수정된 부분] 텍스트가 우측으로 길어지므로 잘리지 않게 x축 여백을 1.12에서 1.35로 늘렸습니다.
+    # 텍스트가 우측으로 길어지므로 잘리지 않게 x축 여백 늘림
     ax.set_xlim(0, float(x_max) * 1.35)
 
     ax.set_xlabel("누적 세대수", fontsize=9)
@@ -765,7 +774,7 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     ax.tick_params(axis='both', labelsize=8)
     ax.legend(loc="lower right", ncol=2, fontsize=8)
 
-    # [수정된 부분] 겹치던 텍스트들을 하나의 문자열로 묶어서 가장 긴 막대 우측에 배치합니다.
+    # 겹치던 텍스트들을 하나의 문자열로 묶어서 가장 긴 막대 우측에 배치
     pad_out = max(8, x_max * 0.015)
     for y, (a, p, lack) in enumerate(zip(
         worst["실제누적세대(선택일)"].fillna(0),
@@ -822,7 +831,22 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     return out
 
 # -------------------- 실행 --------------------
-st.title("입주율 분석 대시보드")
+# [추가된 부분] 메인 타이틀 옆에 로고와 제작 부서 텍스트 추가
+col1, col2 = st.columns([1, 15]) # 화면 분할
+
+with col1:
+    try:
+        # width는 실제 로고 파일 크기에 맞게 조절하세요.
+        st.image("logo.png", width=50) 
+    except Exception:
+        pass
+
+with col2:
+    st.title("입주율 분석 대시보드")
+
+st.markdown("##### ✨ Prepared by 마케팅본부 마케팅기획팀")
+st.markdown("---") # 시각적 안정감을 위한 선 추가
+
 if chosen_font: st.caption(f"한글 폰트 적용: {chosen_font}")
 st.caption(f"{data_caption} | code_ver={CODE_VER}")
 
