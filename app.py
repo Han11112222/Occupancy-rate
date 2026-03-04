@@ -116,7 +116,7 @@ try:
 except Exception:
     pass # 파일이 없어도 에러 방지
 
-st.sidebar.markdown("**🏢 마케팅본부 마케팅기획팀**")
+st.sidebar.markdown("**🏢 마케팅본부 마케팅팀**")
 st.sidebar.divider() # 시각적 구분선 추가
 
 st.sidebar.markdown("### 데이터 / 필터")
