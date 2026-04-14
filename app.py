@@ -528,7 +528,7 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
         table_df = pd.concat([table_df, plan_row], axis=0)
 
         def _fmt_pct(x): return "" if pd.isna(x) else f"{x*100:.1f}%"
-        display_df = table_df.applymap(_fmt_pct)
+        display_df = table_df.map(_fmt_pct)
         
         header_values = [""] + list(display_df.columns)
         cell_values = [display_df.index.tolist()] + [display_df[c].tolist() for c in display_df.columns]
