@@ -124,6 +124,11 @@ except Exception:
 st.sidebar.markdown("**🏢 마케팅본부 마케팅팀**")
 st.sidebar.divider() 
 
+# --- [추가된 부분] 분석 기간, 세대수, 실행 버튼을 사이드바 상단에 배치하기 위한 컨테이너 ---
+top_container = st.sidebar.container()
+st.sidebar.divider()
+# ------------------------------------------------------------------------------------------
+
 st.sidebar.markdown("### 데이터 / 필터")
 load_way = st.sidebar.radio("데이터 불러오기 방식", ["Repo 내 파일 사용", "파일 업로드"], index=0)
 
@@ -307,13 +312,14 @@ if _last_ts is not None:
 else:
     _default_end = (pd.Timestamp.today() + pd.offsets.MonthEnd(0)).date()
 
-st.sidebar.markdown("#### 분석 기간(연·월 기준, 일자는 무시)")
+# --- [수정된 부분] st.sidebar 대신 top_container 를 사용하여 상단에 렌더링 ---
+top_container.markdown("#### 분석 기간(연·월 기준, 일자는 무시)")
 
-start_raw = st.sidebar.date_input(
+start_raw = top_container.date_input(
     "시작일 (연·월 기준, 일자는 무시)",
     value=_default_start
 )
-end_raw = st.sidebar.date_input(
+end_raw = top_container.date_input(
     "종료일 (연·월 기준, 일자는 무시)",
     value=_default_end
 )
@@ -329,15 +335,16 @@ if 시작일 > 종료일:
     시작일, 종료일 = 종료일, 시작일
 
 # 나머지 사이드바 입력
-min_units = st.sidebar.number_input("세대수 하한(세대)", min_value=0, max_value=2000, step=50, value=300)
+min_units = top_container.number_input("세대수 하한(세대)", min_value=0, max_value=2000, step=50, value=300)
 
 if "run_clicked" not in st.session_state:
     st.session_state.run_clicked = False
 
-if st.sidebar.button("입주율 분석 실행", key="run_btn"):
+if top_container.button("입주율 분석 실행", key="run_btn"):
     st.session_state.run_clicked = True
 
 run = st.session_state.run_clicked
+# -------------------------------------------------------------------------------------
 
 # -------------------- 분석/시각화 --------------------
 def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
@@ -448,11 +455,11 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
         column_config={
             "공급승인일자": st.column_config.TextColumn("공급승인일자"),
             "입주시작월":    st.column_config.TextColumn("입주시작월"),
-            "세대수":       st.column_config.NumberColumn("세대수", format="%,d"),
+            "세대수":        st.column_config.NumberColumn("세대수", format="%,d"),
             "입주세대수":    st.column_config.NumberColumn("입주세대수", format="%,d"),
             "잔여세대수":    st.column_config.NumberColumn("잔여세대수", format="%,d"),
             "입주기간(개월)": st.column_config.NumberColumn("입주기간(개월)", format="%d"),
-            "입주율":       st.column_config.TextColumn("입주율"),
+            "입주율":        st.column_config.TextColumn("입주율"),
         },
     )
 
@@ -729,7 +736,7 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     st.markdown("---")
     view_mode = st.radio(
         "📊 조회 대상 선택",
-        ["🚨 계획 대비 저조 단지", "🌟 계획 초과(우수) 단지", "전체 단지 보기"],
+        ["🚨 계획 대비 저조 단지", "🌟 계획 초과(우수 단지)", "전체 단지 보기"],
         horizontal=True,
         key="view_mode_radio"
     )
@@ -738,7 +745,7 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
         out = cohort[cohort["편차(pp)"] < 0].copy()
         sort_asc = True
         title_prefix = "🚨 2025년 이후 계획 대비 저조 단지"
-    elif view_mode == "🌟 계획 초과(우수) 단지":
+    elif view_mode == "🌟 계획 초과(우수 단지)":
         out = cohort[cohort["편차(pp)"] >= 0].copy()
         sort_asc = False  
         title_prefix = "🌟 2025년 이후 계획 초과(우수) 단지"
