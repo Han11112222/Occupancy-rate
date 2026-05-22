@@ -313,14 +313,14 @@ else:
     _default_end = (pd.Timestamp.today() + pd.offsets.MonthEnd(0)).date()
 
 # --- [수정된 부분] st.sidebar 대신 top_container 를 사용하여 상단에 렌더링 ---
-top_container.markdown("#### 분석 기간(연·월 기준, 일자는 무시)")
+top_container.markdown("#### 분석 기간(연·월 기준)")
 
 start_raw = top_container.date_input(
-    "시작일 (연·월 기준, 일자는 무시)",
+    "시작일 (연·월 기준)",
     value=_default_start
 )
 end_raw = top_container.date_input(
-    "종료일 (연·월 기준, 일자는 무시)",
+    "종료일 (연·월 기준)",
     value=_default_end
 )
 
