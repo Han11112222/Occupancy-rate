@@ -446,7 +446,9 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
     for c in ["세대수","입주세대수","잔여세대수","입주기간(개월)"]:
         if c in display_df.columns:
             display_df[c] = pd.to_numeric(display_df[c], errors="coerce").round().astype("Int64")
-    display_df = _format_pct_cols(display_df, ["입주율"])
+
+    # ✅ [수정] 입주율은 float 그대로 유지 — 문자열 변환 시 정렬이 사전순으로 동작하는 버그 방지
+    # display_df = _format_pct_cols(display_df, ["입주율"])  ← 제거
 
     st.subheader(f"✅ [{시작일:%Y-%m} ~ {종료일:%Y-%m}] (세대수 ≥ {min_units}) 입주현황 요약표")
     st.dataframe(
@@ -459,7 +461,8 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
             "입주세대수":    st.column_config.NumberColumn("입주세대수", format="%,d"),
             "잔여세대수":    st.column_config.NumberColumn("잔여세대수", format="%,d"),
             "입주기간(개월)": st.column_config.NumberColumn("입주기간(개월)", format="%d"),
-            "입주율":        st.column_config.TextColumn("입주율"),
+            # ✅ [수정] TextColumn → NumberColumn 으로 변경하여 숫자 기준 오름/내림차순 정렬 정상 동작
+            "입주율":        st.column_config.NumberColumn("입주율", format="%.1f%%"),
         },
     )
 
