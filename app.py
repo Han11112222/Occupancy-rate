@@ -842,6 +842,129 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     ax2.grid(alpha=0.3); fig2.tight_layout(); apply_korean_font(fig2); st.pyplot(fig2, use_container_width=True)
     return out
 
+# -------------------- [추가] 공동주택 검색 함수 --------------------
+def search_complex(keyword: str, ref_date: pd.Timestamp, MAX_M: int = 9):
+    """keyword 로 아파트명을 부분검색하여 계획 vs 실적 요약을 표시"""
+    month_cols = ensure_start_index(df)
+    ref_date = pd.to_datetime(ref_date)
+
+    PLAN = {1: 9.29, 2: 43.25, 3: 62.75, 4: 72.61, 5: 78.17, 6: 81.56, 7: 84.28, 8: 86.07, 9: 87.86}
+    PLAN = {k: min(1.0, v / 100) for k, v in PLAN.items()}
+
+    matched = df[df["아파트명"].astype(str).str.contains(keyword, na=False)].copy()
+
+    if matched.empty:
+        st.warning(f"🔍 '{keyword}' 와 일치하는 단지가 없습니다.")
+        return
+
+    def cum_rate(row, m):
+        idx = int(row["입주시작index"])
+        cols = month_cols[idx: idx + m]
+        num = sum([0 if pd.isna(row.get(c)) else row.get(c) for c in cols])
+        den = row["세대수"]
+        return _safe_ratio(num, den)
+
+    def months_elapsed(row):
+        if pd.isna(row.get("입주시작월")):
+            return 0
+        delta = (ref_date.year - row["입주시작월"].year) * 12 + (ref_date.month - row["입주시작월"].month) + 1
+        return max(0, min(MAX_M, delta))
+
+    rows_out = []
+    for _, r in matched.iterrows():
+        if pd.isna(r.get("입주시작index")) or pd.isna(r.get("세대수")):
+            continue
+        m = months_elapsed(r)
+        actual = cum_rate(r, m) if m > 0 else np.nan
+        plan   = PLAN.get(m, np.nan) if m > 0 else np.nan
+        diff   = (actual - plan) * 100 if pd.notna(actual) and pd.notna(plan) else np.nan
+        actual_units = round(actual * r["세대수"]) if pd.notna(actual) else np.nan
+        plan_units   = round(plan   * r["세대수"]) if pd.notna(plan)   else np.nan
+        lack_units   = max(0, plan_units - actual_units) if pd.notna(plan_units) and pd.notna(actual_units) else np.nan
+
+        rows_out.append({
+            "아파트명":           r["아파트명"],
+            "세대수":             int(r["세대수"]),
+            "입주시작월":         r.get("입주시작월", pd.NaT),
+            "경과개월":           m,
+            "실제누적세대":       int(actual_units) if pd.notna(actual_units) else pd.NA,
+            "계획누적세대":       int(plan_units)   if pd.notna(plan_units)   else pd.NA,
+            "현재_부족세대":      int(lack_units)   if pd.notna(lack_units)   else pd.NA,
+            "실제누적(비율)":     actual,
+            "계획누적(비율)":     plan,
+            "편차(pp)":           diff,
+        })
+
+    if not rows_out:
+        st.warning(f"🔍 '{keyword}' 단지의 입주시작 데이터가 없습니다.")
+        return
+
+    result = pd.DataFrame(rows_out)
+
+    # ── 표 표시 ──
+    disp = result.copy()
+    disp["입주시작월"] = _fmt_date_str(disp["입주시작월"])
+    disp = _format_pct_cols(disp, ["실제누적(비율)", "계획누적(비율)"])
+
+    st.dataframe(
+        disp,
+        use_container_width=True,
+        column_config={
+            "세대수":         st.column_config.NumberColumn("세대수",         format="%,d"),
+            "경과개월":       st.column_config.NumberColumn("경과개월",       format="%d"),
+            "실제누적세대":   st.column_config.NumberColumn("실제누적세대",   format="%,d"),
+            "계획누적세대":   st.column_config.NumberColumn("계획누적세대",   format="%,d"),
+            "현재_부족세대":  st.column_config.NumberColumn("현재_부족세대",  format="%,d"),
+            "실제누적(비율)": st.column_config.TextColumn("실제누적(비율)"),
+            "계획누적(비율)": st.column_config.TextColumn("계획누적(비율)"),
+            "편차(pp)":       st.column_config.NumberColumn("편차(pp)",       format="%+.1f"),
+        },
+    )
+
+    # ── 계획 vs 실적 누적 세대수 가로막대 그래프 ──
+    plot_df = result.dropna(subset=["실제누적세대", "계획누적세대"]).copy()
+    if plot_df.empty:
+        return
+
+    fig_h = max(2.5, len(plot_df) * 0.55)
+    fig, ax = plt.subplots(figsize=(8.5, fig_h))
+
+    y_labels = [
+        f"{n} ({h}세대) · {m}개월차"
+        for n, h, m in zip(plot_df["아파트명"], plot_df["세대수"], plot_df["경과개월"])
+    ]
+
+    ax.barh(y_labels, plot_df["계획누적세대"], height=0.7,
+            color="tab:blue", alpha=0.55, edgecolor="none", label="계획 누적 세대")
+    ax.barh(y_labels, plot_df["실제누적세대"], height=0.35,
+            color="tab:orange", alpha=0.95, label="실제 누적 세대")
+
+    x_vals = list(plot_df["계획누적세대"]) + list(plot_df["실제누적세대"])
+    x_max  = max((v for v in x_vals if pd.notna(v)), default=1)
+    ax.set_xlim(0, float(x_max) * 1.40)
+    ax.set_xlabel("누적 세대수", fontsize=9)
+    ax.set_title(f"계획 vs 실적 누적 세대수  (기준일: {ref_date:%Y-%m-%d})", fontsize=11)
+    ax.tick_params(axis="both", labelsize=8)
+    ax.legend(loc="lower right", ncol=2, fontsize=8)
+
+    pad = max(5, x_max * 0.015)
+    for yi, (a, p, lack) in enumerate(zip(
+        plot_df["실제누적세대"].fillna(0),
+        plot_df["계획누적세대"].fillna(0),
+        plot_df["현재_부족세대"].fillna(0),
+    )):
+        a = int(a); p = int(p); lack = int(lack)
+        diff_str = f"부족 {lack:,}" if p > a else (f"초과 {a-p:,}" if a > p else "계획 달성")
+        ax.text(max(a, p) + pad, yi,
+                f"{a:,}세대 (계획 {p:,} | {diff_str})",
+                va="center", ha="left", fontsize=8.5, alpha=0.9)
+
+    ax.invert_yaxis()
+    ax.grid(axis="x", alpha=0.3)
+    fig.tight_layout()
+    apply_korean_font(fig)
+    st.pyplot(fig, use_container_width=True)
+
 # -------------------- 실행 --------------------
 col1, col2 = st.columns([1, 15])
 
@@ -855,6 +978,32 @@ with col2:
     st.title("🏡 입주율 분석 대시보드")
 
 st.markdown("##### ✨ Prepared by 마케팅본부 마케팅팀")
+
+# -------------------- [추가] 공동주택 검색 섹션 --------------------
+with st.expander("🔍 공동주택 검색", expanded=False):
+    if df.empty:
+        st.info("데이터를 먼저 불러와 주세요.")
+    else:
+        s_col1, s_col2 = st.columns([3, 1])
+        with s_col1:
+            search_keyword = st.text_input(
+                "아파트명 검색 (부분 입력 가능)",
+                placeholder="예) 해링턴, 힐스테이트, 달서...",
+                key="search_keyword_input",
+                label_visibility="collapsed",
+            )
+        with s_col2:
+            search_btn = st.button("검색", key="search_btn", use_container_width=True)
+
+        if search_btn and search_keyword.strip():
+            ensure_start_index(df)
+            ref = 종료일  # 사이드바에서 설정한 종료일 기준
+            st.markdown(f"##### 🔎 '{search_keyword.strip()}' 검색 결과 — 기준일: {ref:%Y-%m-%d}")
+            search_complex(search_keyword.strip(), ref_date=ref)
+        elif search_btn and not search_keyword.strip():
+            st.warning("검색어를 입력해 주세요.")
+# ── 검색 섹션 끝 ──────────────────────────────────────────────────
+
 st.markdown("---")
 
 if chosen_font: st.caption(f"한글 폰트 적용: {chosen_font}")
