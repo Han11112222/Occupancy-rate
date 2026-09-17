@@ -969,8 +969,8 @@ def search_complex(keyword: str, ref_date: pd.Timestamp, MAX_M: int = 9):
     if plot_df.empty:
         return
 
-    fig_h = max(2.5, len(plot_df) * 0.55) / 2  # 🛠 그래프 높이 절반으로 축소(요청 반영)
-    fig, ax = plt.subplots(figsize=(8.5, fig_h + 0.8))  # +0.8: 하단 범례 공간 확보(그래프 자체 크기는 유지)
+    fig_h = max(2.5, len(plot_df) * 0.55) / 4  # 🛠 막대그래프 높이만 추가로 절반 축소(요청 반영)
+    fig, ax = plt.subplots(figsize=(8.5, fig_h + 0.8))  # +0.8: 하단 범례 공간(고정, 막대 높이와 무관)
 
     y_labels = [
         f"{n} ({h}세대) · {m}개월차"
