@@ -970,7 +970,7 @@ def search_complex(keyword: str, ref_date: pd.Timestamp, MAX_M: int = 9):
         return
 
     fig_h = max(2.5, len(plot_df) * 0.55) / 2  # 🛠 그래프 높이 절반으로 축소(요청 반영)
-    fig, ax = plt.subplots(figsize=(8.5, fig_h))
+    fig, ax = plt.subplots(figsize=(8.5, fig_h + 0.8))  # +0.8: 하단 범례 공간 확보(그래프 자체 크기는 유지)
 
     y_labels = [
         f"{n} ({h}세대) · {m}개월차"
@@ -988,7 +988,7 @@ def search_complex(keyword: str, ref_date: pd.Timestamp, MAX_M: int = 9):
     ax.set_xlabel("누적 세대수", fontsize=9)
     ax.set_title(f"계획 vs 실적 누적 세대수  (기준일: {ref_date:%Y-%m-%d})", fontsize=11)
     ax.tick_params(axis="both", labelsize=8)
-    ax.legend(loc="upper right", bbox_to_anchor=(1.0, -0.32), ncol=2, fontsize=8, frameon=False)
+    ax.legend(loc="upper right", bbox_to_anchor=(1.0, -0.20), ncol=2, fontsize=8, frameon=False)
 
     pad = max(5, x_max * 0.015)
     for yi, (a, p, lack) in enumerate(zip(
@@ -1004,7 +1004,7 @@ def search_complex(keyword: str, ref_date: pd.Timestamp, MAX_M: int = 9):
 
     ax.invert_yaxis()
     ax.grid(axis="x", alpha=0.3)
-    fig.tight_layout(rect=[0, 0.10, 1, 1])
+    fig.tight_layout()
     apply_korean_font(fig)
     st.pyplot(fig, use_container_width=True)
 
