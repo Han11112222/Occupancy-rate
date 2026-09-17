@@ -270,10 +270,16 @@ def _last_data_date_from_df(_df: pd.DataFrame) -> pd.Timestamp | None:
         return None
 
     priority_keywords = ["데이터", "기준", "마감", "컷오프", "cutoff", "집계", "최종", "마지막"]
+    # 🛠 [버그 수정] '공급승인일자'는 분양(공급) 승인일일 뿐 실제 입주 데이터가 언제까지
+    # 집계되었는지와는 무관함. 이 컬럼이 후보로 잡히면서 (아직 미래인) 공급승인 예정 단지의
+    # 날짜가 "가장 최근 데이터일"로 잘못 선택되어 종료일 기본값이 틀어지는 문제가 있었음.
+    exclude_cols = ["공급승인일자"]
     priority_dates = []
     generic_dates = []
 
     for col in _df.columns:
+        if col in exclude_cols:
+            continue
         if pd.api.types.is_numeric_dtype(_df[col]):
             continue
         try:
@@ -305,7 +311,9 @@ else:
 if _last_ts is not None:
     _default_end = (_last_ts + pd.offsets.MonthEnd(0)).date()
 else:
-    _default_end = (pd.Timestamp.today() + pd.offsets.MonthEnd(0)).date()
+    # 🛠 [버그 수정] 엑셀에 데이터 기준일 컬럼이 없는 경우, 월간 보고는 보통 한 달
+    # 지연되어 집계되므로 "이번 달 말"이 아닌 "전월 말"을 기본값으로 사용.
+    _default_end = (pd.Timestamp.today().replace(day=1) - pd.Timedelta(days=1)).date()
 
 top_container.markdown("#### 분석 기간(연·월 기준)")
 
