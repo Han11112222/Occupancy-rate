@@ -978,9 +978,9 @@ def search_complex(keyword: str, ref_date: pd.Timestamp, MAX_M: int = 9):
     ]
 
     ax.barh(y_labels, plot_df["계획누적세대"].fillna(0), height=0.7,
-            color="tab:blue", alpha=0.55, edgecolor="none", label="계획 누적 세대")
+            color="#AEC6E0", alpha=1.0, edgecolor="none", label="계획 누적 세대")
     ax.barh(y_labels, plot_df["실제누적세대"].fillna(0), height=0.35,
-            color="tab:orange", alpha=0.95, label="실제 누적 세대")
+            color="#1B3358", alpha=1.0, label="실제 누적 세대")
 
     x_vals = list(plot_df["계획누적세대"]) + list(plot_df["실제누적세대"])
     x_max  = max((v for v in x_vals if pd.notna(v)), default=1)
