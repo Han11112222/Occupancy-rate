@@ -988,7 +988,7 @@ def search_complex(keyword: str, ref_date: pd.Timestamp, MAX_M: int = 9):
     ax.set_xlabel("누적 세대수", fontsize=9)
     ax.set_title(f"계획 vs 실적 누적 세대수  (기준일: {ref_date:%Y-%m-%d})", fontsize=11)
     ax.tick_params(axis="both", labelsize=8)
-    ax.legend(loc="lower right", ncol=2, fontsize=8)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22), ncol=2, fontsize=8, frameon=False)
 
     pad = max(5, x_max * 0.015)
     for yi, (a, p, lack) in enumerate(zip(
