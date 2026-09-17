@@ -301,56 +301,19 @@ def _last_data_date_from_df(_df: pd.DataFrame) -> pd.Timestamp | None:
         return max(generic_dates)
     return None
 
-# 🛠 [버그 수정] 이 파일처럼 "기준일" 성격의 날짜 컬럼이 전혀 없는 경우, 실제로
-# 값이 채워진 마지막 "N개월" 컬럼을 공급승인일자 기준 캘린더 날짜로 환산해서
-# 데이터가 실제로 어디까지 입력되어 있는지 추정한다. (여러 단지에 걸쳐 가장 늦게까지
-# 데이터가 채워진 시점 = 파일의 실제 데이터 기준일에 가장 가까움)
-def _infer_cutoff_from_month_cols(_df: pd.DataFrame):
-    if _df is None or _df.empty or "공급승인일자" not in _df.columns:
-        return None
-    month_cols = [c for c in _df.columns if "개월" in str(c)]
-    if not month_cols:
-        return None
-
-    def _key(c):
-        s = "".join(ch for ch in str(c) if ch.isdigit())
-        return int(s) if s else 0
-
-    month_cols = sorted(month_cols, key=_key)
-
-    best = None
-    for _, row in _df.iterrows():
-        appr = row.get("공급승인일자")
-        if pd.isna(appr):
-            continue
-        last_idx = -1
-        for i, c in enumerate(month_cols):
-            if pd.notna(row.get(c)):
-                last_idx = i
-        if last_idx < 0:
-            continue
-        cand = appr + pd.DateOffset(months=last_idx + 1)
-        if best is None or cand > best:
-            best = cand
-    return best
-
 _default_start = pd.Timestamp("2021-01-01").date()
 
 if df is not None and not df.empty:
     _last_ts = _last_data_date_from_df(df)
-    if _last_ts is None:
-        # 🛠 [버그 수정] 명시적인 '기준일' 컬럼이 없는 경우, 월별(개월) 데이터가
-        # 실제로 채워진 범위를 근거로 데이터 기준일을 추정 (전월 말로 무작정
-        # 추정하면 이 파일처럼 실제 데이터가 더 뒤까지 있는 경우 종료일이 짧게 잡힘)
-        _last_ts = _infer_cutoff_from_month_cols(df)
 else:
     _last_ts = None
 
 if _last_ts is not None:
     _default_end = (_last_ts + pd.offsets.MonthEnd(0)).date()
 else:
-    # 🛠 데이터에서 기준일을 전혀 추정할 수 없는 경우의 최종 fallback:
-    # 월간 보고는 보통 한 달 지연되어 집계되므로 "이번 달 말"이 아닌 "전월 말" 사용.
+    # 🛠 [버그 수정] 엑셀에 데이터 기준일 컬럼이 없는 경우, 월간 보고는 보통 한 달
+    # 지연되어 집계되므로 "이번 달 말"이 아닌 "전월 말"을 기본값으로 사용.
+    # (※ 개월 컬럼의 마지막 값 기반 추정은 이 파일 구조와 맞지 않아 되돌림)
     _default_end = (pd.Timestamp.today().replace(day=1) - pd.Timedelta(days=1)).date()
 
 top_container.markdown("#### 분석 기간(연·월 기준)")
