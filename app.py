@@ -626,18 +626,25 @@ def cohort2025_progress(end_date, min_units=0, MAX_M=9):
         num = sum([0 if pd.isna(row.get(c)) else row.get(c) for c in cols]); den = row["세대수"]
         return _safe_ratio(num, den)
 
+    # 🛠 [버그 수정] 실제 경과개월을 MAX_M(=9)로 잘라버리면, MAX_M개월을 넘겨 입주가
+    # 진행 중인 단지의 "현재 실적"이 초반 MAX_M개월치 실적으로 축소 왜곡되어 표시됨.
+    # (예: 31개월 누적 216세대인 단지가 9개월차 4세대로 표시되는 문제)
+    # → 경과개월은 실제 값을 그대로 사용하고, MAX_M은 1~MAX_M 구간 상세표 생성에만 사용.
     def months_elapsed_from_start(row):
         if pd.isna(row["입주시작월"]): return 0
         delta = (end_date.year - row["입주시작월"].year) * 12 + (end_date.month - row["입주시작월"].month) + 1
-        return max(0, min(MAX_M, delta))
+        return max(0, delta)
 
     cohort["경과개월(선택일기준)"] = cohort.apply(months_elapsed_from_start, axis=1)
     for m in range(1, MAX_M + 1):
         cohort[f"입주율_{m}개월"] = cohort.apply(lambda r, m=m: cum_rate(r, m) if r["경과개월(선택일기준)"] >= m else np.nan, axis=1)
 
+    # 🛠 [버그 수정] 이전에는 1~MAX_M개월치로만 미리 만들어둔 컬럼(입주율_1개월~입주율_9개월)에서
+    # 값을 찾아왔기 때문에 실제 경과개월이 MAX_M을 넘는 단지는 값을 못 찾고 잘못된 값이 됨.
+    # → 실제 경과개월(m)로 직접 누적율을 계산하도록 변경.
     def cumulative_as_of_selected(row):
         m = int(row["경과개월(선택일기준)"])
-        return np.nan if m <= 0 else row.get(f"입주율_{m}개월", np.nan)
+        return np.nan if m <= 0 else cum_rate(row, m)
 
     cohort["선택일기준_누적입주율"] = cohort.apply(cumulative_as_of_selected, axis=1)
 
@@ -698,10 +705,13 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
         num = sum([0 if pd.isna(row.get(c)) else row.get(c) for c in cols]); den = row["세대수"]
         return _safe_ratio(num, den)
 
+    # 🛠 [버그 수정] cohort2025_progress와 동일한 이유로, 실제 경과개월을 MAX_M으로
+    # 자르지 않도록 수정. (계획(PLAN) 대비 비교는 원래 1~9개월치만 있으므로,
+    # 9개월을 넘는 경우 계획/편차는 자연스럽게 공란(NaN) 처리됨 — 실제 누적실적은 정확히 계산)
     def months_elapsed_from_start(row):
         if pd.isna(row["입주시작월"]): return 0
         delta = (end_date.year - row["입주시작월"].year) * 12 + (end_date.month - row["입주시작월"].month) + 1
-        return max(0, min(MAX_M, delta))
+        return max(0, delta)
 
     cohort["경과개월(선택일기준)"] = cohort.apply(months_elapsed_from_start, axis=1)
 
@@ -864,11 +874,16 @@ def search_complex(keyword: str, ref_date: pd.Timestamp, MAX_M: int = 9):
         den = row["세대수"]
         return _safe_ratio(num, den)
 
+    # 🛠 [버그 수정] 실제 경과개월을 MAX_M(=9)로 잘라버리는 문제가 있었음.
+    # 이 때문에 입주시작 후 MAX_M개월을 넘겨 진행 중인 단지(예: 31개월 누적 216세대)의
+    # "현재 실적"이 초반 MAX_M개월치 실적(예: 4세대)으로 축소 왜곡되어 표시되었음.
+    # → 경과개월은 실제 값을 그대로 사용. PLAN은 원래 1~9개월치만 있으므로 그 이후는
+    #   자연스럽게 계획 대비 비교가 생략(NaN)되고, 실제 누적실적은 정확히 계산됨.
     def months_elapsed(row):
         if pd.isna(row.get("입주시작월")):
             return 0
         delta = (ref_date.year - row["입주시작월"].year) * 12 + (ref_date.month - row["입주시작월"].month) + 1
-        return max(0, min(MAX_M, delta))
+        return max(0, delta)
 
     rows_out = []
     for _, r in matched.iterrows():
