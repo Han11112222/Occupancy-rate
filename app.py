@@ -969,7 +969,7 @@ def search_complex(keyword: str, ref_date: pd.Timestamp, MAX_M: int = 9):
     if plot_df.empty:
         return
 
-    fig_h = max(2.5, len(plot_df) * 0.55)
+    fig_h = max(2.5, len(plot_df) * 0.55) / 2  # 🛠 그래프 높이 절반으로 축소(요청 반영)
     fig, ax = plt.subplots(figsize=(8.5, fig_h))
 
     y_labels = [
