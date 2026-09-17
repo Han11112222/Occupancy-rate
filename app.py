@@ -945,7 +945,10 @@ def search_complex(keyword: str, ref_date: pd.Timestamp, MAX_M: int = 9):
     )
 
     # ── 계획 vs 실적 누적 세대수 가로막대 그래프 ──
-    plot_df = result.dropna(subset=["실제누적세대", "계획누적세대"]).copy()
+    # 🛠 [버그 수정] 계획(PLAN)은 1~9개월치만 존재하므로, 9개월을 넘겨 입주가 진행된
+    # 단지는 "계획누적세대"가 없어(None) 이 행이 통째로 제외되어 그래프가 아예
+    # 안 보이는 문제가 있었음. → 실제누적세대만 있으면 그리도록 조건 완화.
+    plot_df = result.dropna(subset=["실제누적세대"]).copy()
     if plot_df.empty:
         return
 
@@ -957,9 +960,9 @@ def search_complex(keyword: str, ref_date: pd.Timestamp, MAX_M: int = 9):
         for n, h, m in zip(plot_df["아파트명"], plot_df["세대수"], plot_df["경과개월"])
     ]
 
-    ax.barh(y_labels, plot_df["계획누적세대"], height=0.7,
+    ax.barh(y_labels, plot_df["계획누적세대"].fillna(0), height=0.7,
             color="tab:blue", alpha=0.55, edgecolor="none", label="계획 누적 세대")
-    ax.barh(y_labels, plot_df["실제누적세대"], height=0.35,
+    ax.barh(y_labels, plot_df["실제누적세대"].fillna(0), height=0.35,
             color="tab:orange", alpha=0.95, label="실제 누적 세대")
 
     x_vals = list(plot_df["계획누적세대"]) + list(plot_df["실제누적세대"])
