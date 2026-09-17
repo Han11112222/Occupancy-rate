@@ -970,7 +970,7 @@ def search_complex(keyword: str, ref_date: pd.Timestamp, MAX_M: int = 9):
         return
 
     fig_h = max(2.5, len(plot_df) * 0.55) / 4  # 🛠 막대그래프 높이만 추가로 절반 축소(요청 반영)
-    fig, ax = plt.subplots(figsize=(8.5, fig_h + 0.8))  # +0.8: 하단 범례 공간(고정, 막대 높이와 무관)
+    fig, ax = plt.subplots(figsize=(8.5, fig_h + 1.1))  # +1.1: 하단 범례 공간(고정, 막대 높이와 무관)
 
     y_labels = [
         f"{n} ({h}세대) · {m}개월차"
@@ -988,7 +988,7 @@ def search_complex(keyword: str, ref_date: pd.Timestamp, MAX_M: int = 9):
     ax.set_xlabel("누적 세대수", fontsize=9)
     ax.set_title(f"계획 vs 실적 누적 세대수  (기준일: {ref_date:%Y-%m-%d})", fontsize=11)
     ax.tick_params(axis="both", labelsize=8)
-    ax.legend(loc="upper right", bbox_to_anchor=(1.0, -0.20), ncol=2, fontsize=8, frameon=False)
+    ax.legend(loc="upper right", bbox_to_anchor=(1.0, -0.42), ncol=2, fontsize=8, frameon=False)
 
     pad = max(5, x_max * 0.015)
     for yi, (a, p, lack) in enumerate(zip(
