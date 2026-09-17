@@ -301,18 +301,56 @@ def _last_data_date_from_df(_df: pd.DataFrame) -> pd.Timestamp | None:
         return max(generic_dates)
     return None
 
+# 🛠 [버그 수정] 이 파일처럼 "기준일" 성격의 날짜 컬럼이 전혀 없는 경우, 실제로
+# 값이 채워진 마지막 "N개월" 컬럼을 공급승인일자 기준 캘린더 날짜로 환산해서
+# 데이터가 실제로 어디까지 입력되어 있는지 추정한다. (여러 단지에 걸쳐 가장 늦게까지
+# 데이터가 채워진 시점 = 파일의 실제 데이터 기준일에 가장 가까움)
+def _infer_cutoff_from_month_cols(_df: pd.DataFrame):
+    if _df is None or _df.empty or "공급승인일자" not in _df.columns:
+        return None
+    month_cols = [c for c in _df.columns if "개월" in str(c)]
+    if not month_cols:
+        return None
+
+    def _key(c):
+        s = "".join(ch for ch in str(c) if ch.isdigit())
+        return int(s) if s else 0
+
+    month_cols = sorted(month_cols, key=_key)
+
+    best = None
+    for _, row in _df.iterrows():
+        appr = row.get("공급승인일자")
+        if pd.isna(appr):
+            continue
+        last_idx = -1
+        for i, c in enumerate(month_cols):
+            if pd.notna(row.get(c)):
+                last_idx = i
+        if last_idx < 0:
+            continue
+        cand = appr + pd.DateOffset(months=last_idx + 1)
+        if best is None or cand > best:
+            best = cand
+    return best
+
 _default_start = pd.Timestamp("2021-01-01").date()
 
 if df is not None and not df.empty:
     _last_ts = _last_data_date_from_df(df)
+    if _last_ts is None:
+        # 🛠 [버그 수정] 명시적인 '기준일' 컬럼이 없는 경우, 월별(개월) 데이터가
+        # 실제로 채워진 범위를 근거로 데이터 기준일을 추정 (전월 말로 무작정
+        # 추정하면 이 파일처럼 실제 데이터가 더 뒤까지 있는 경우 종료일이 짧게 잡힘)
+        _last_ts = _infer_cutoff_from_month_cols(df)
 else:
     _last_ts = None
 
 if _last_ts is not None:
     _default_end = (_last_ts + pd.offsets.MonthEnd(0)).date()
 else:
-    # 🛠 [버그 수정] 엑셀에 데이터 기준일 컬럼이 없는 경우, 월간 보고는 보통 한 달
-    # 지연되어 집계되므로 "이번 달 말"이 아닌 "전월 말"을 기본값으로 사용.
+    # 🛠 데이터에서 기준일을 전혀 추정할 수 없는 경우의 최종 fallback:
+    # 월간 보고는 보통 한 달 지연되어 집계되므로 "이번 달 말"이 아닌 "전월 말" 사용.
     _default_end = (pd.Timestamp.today().replace(day=1) - pd.Timedelta(days=1)).date()
 
 top_container.markdown("#### 분석 기간(연·월 기준)")
@@ -708,6 +746,14 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     PLAN = {1: 9.29, 2: 43.25, 3: 62.75, 4: 72.61, 5: 78.17, 6: 81.56, 7: 84.28, 8: 86.07, 9: 87.86}
     PLAN = {k: min(1.0, v / 100) for k, v in PLAN.items()}
 
+    # 🛠 12개월 초과 시 계획을 100%로 간주 (PLAN 원본은 1~9개월치만 존재)
+    def _plan_ratio(m):
+        if m in PLAN:
+            return PLAN[m]
+        if m > 12:
+            return 1.0
+        return np.nan
+
     def cum_rate(row, m):
         idx = int(row["입주시작index"]); cols = month_cols[idx: idx + m]
         num = sum([0 if pd.isna(row.get(c)) else row.get(c) for c in cols]); den = row["세대수"]
@@ -729,7 +775,7 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
         if m <= 0:
             actual, plan, diff = np.nan, np.nan, np.nan
         else:
-            actual = cum_rate(r, m); plan = PLAN.get(m, np.nan)
+            actual = cum_rate(r, m); plan = _plan_ratio(m)
             diff = (actual - plan) if pd.notna(actual) and pd.notna(plan) else np.nan
         actual_list.append(actual); plan_list.append(plan); diff_list.append(diff)
 
@@ -869,6 +915,14 @@ def search_complex(keyword: str, ref_date: pd.Timestamp, MAX_M: int = 9):
     PLAN = {1: 9.29, 2: 43.25, 3: 62.75, 4: 72.61, 5: 78.17, 6: 81.56, 7: 84.28, 8: 86.07, 9: 87.86}
     PLAN = {k: min(1.0, v / 100) for k, v in PLAN.items()}
 
+    # 🛠 12개월 초과 시 계획을 100%로 간주 (PLAN 원본은 1~9개월치만 존재)
+    def _plan_ratio(m):
+        if m in PLAN:
+            return PLAN[m]
+        if m > 12:
+            return 1.0
+        return np.nan
+
     matched = df[df["아파트명"].astype(str).str.contains(keyword, na=False)].copy()
 
     if matched.empty:
@@ -899,7 +953,7 @@ def search_complex(keyword: str, ref_date: pd.Timestamp, MAX_M: int = 9):
             continue
         m = months_elapsed(r)
         actual = cum_rate(r, m) if m > 0 else np.nan
-        plan   = PLAN.get(m, np.nan) if m > 0 else np.nan
+        plan   = _plan_ratio(m) if m > 0 else np.nan
         diff   = (actual - plan) * 100 if pd.notna(actual) and pd.notna(plan) else np.nan
         actual_units = round(actual * r["세대수"]) if pd.notna(actual) else np.nan
         plan_units   = round(plan   * r["세대수"]) if pd.notna(plan)   else np.nan
