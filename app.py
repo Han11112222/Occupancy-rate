@@ -809,8 +809,8 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
 
     y_labels = [f"{n} ({h}세대) · {m}개월차" for n, h, m in zip(worst["아파트명"], worst["세대수"], worst["경과개월(선택일기준)"])]
 
-    ax.barh(y_labels, worst["계획누적세대(선택일)"], height=0.7, color="tab:blue", alpha=0.55, edgecolor="none", label="계획 누적 세대")
-    ax.barh(y_labels, worst["실제누적세대(선택일)"], height=0.35, color="tab:orange", alpha=0.95, label="실제 누적 세대")
+    ax.barh(y_labels, worst["계획누적세대(선택일)"], height=0.7, color="#AEC6E0", alpha=1.0, edgecolor="none", label="계획 누적 세대")
+    ax.barh(y_labels, worst["실제누적세대(선택일)"], height=0.35, color="#1B3358", alpha=1.0, label="실제 누적 세대")
 
     x_max = max(worst["계획누적세대(선택일)"].max(skipna=True), worst["실제누적세대(선택일)"].max(skipna=True))
 
