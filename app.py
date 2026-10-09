@@ -477,39 +477,6 @@ def build_top_map_options(시작일, 종료일, min_units):
             ("계획누적", "계획누적(비율)", "pct"), ("편차", "편차(pp)", "pp")]),
     }
 
-# -------------------- [신규] 최상단 간략 요약: 현재연도 실적/계획 --------------------
-def current_year_brief(year, ref_date):
-    """year 에 입주를 시작한 '전체 단지'(세대수 하한 미적용)를 분모로,
-    기준일(ref_date)까지의 실제 입주세대 vs 사업계획 누적 세대를 한 줄로 요약"""
-    month_cols = ensure_start_index(df)
-    y_start = pd.Timestamp(year=year, month=1, day=1)
-    ref = min(pd.to_datetime(ref_date), pd.Timestamp(year=year, month=12, day=31))
-    st.header(f"📅 {year}년 입주 실적 / 계획")
-    if ref < y_start:
-        st.info(f"⚠️ 분석 종료일이 {year}년 이전이라 표시할 실적이 없어.")
-        return
-    c = df[(df["입주시작월"] >= y_start) & (df["입주시작월"] <= ref)
-           & df["입주시작index"].notna() & df["세대수"].notna()].copy()
-    if c.empty:
-        st.info(f"⚠️ {year}년에 입주를 시작한 단지가 없어.")
-        return
-
-    def _units(row):  # 입주시작월 ~ 기준월까지 실제 입주세대 합
-        m = _months_elapsed(row, ref); idx = int(row["입주시작index"])
-        return sum(0 if pd.isna(row.get(col)) else row.get(col) for col in month_cols[idx: idx + m])
-
-    c["실적"] = c.apply(_units, axis=1)
-    c["계획"] = c["세대수"] * c.apply(lambda r: _plan_ratio_hold(_months_elapsed(r, ref)), axis=1)
-    n, tot = len(c), int(c["세대수"].sum())
-    act, pln = int(c["실적"].sum()), int(round(c["계획"].sum()))
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("전체 단지 / 세대수(분모)", f"{n:,}개 / {tot:,}세대")
-    k2.metric(f"계획 누적 ({ref:%-m}월 기준)", f"{pln:,}세대", f"계획률 {pln/tot*100:.1f}%", delta_color="off")
-    k3.metric(f"실적 누적 ({ref:%-m}월 기준)", f"{act:,}세대", f"입주율 {act/tot*100:.1f}%", delta_color="off")
-    k4.metric("계획 대비", f"{act-pln:+,}세대", f"달성률 {(act/pln*100 if pln else 0):.1f}%")
-    st.caption(f"{year}년 입주시작 전체 단지(세대수 하한 미적용) · 실적은 {ref:%Y-%m-%d}까지 입주세대 · "
-               f"계획은 단지별 경과개월 사업계획 누적율 적용 · 입주율/계획률 분모 = 전체 단지 세대수")
-
 # -------------------- 종료일 디폴트: 엑셀 내 가장 최신 날짜 찾기 --------------------
 def _last_data_date_from_df(_df: pd.DataFrame) -> pd.Timestamp | None:
     if _df is None or _df.empty:
@@ -577,9 +544,6 @@ if 시작일 > 종료일:
     시작일, 종료일 = 종료일, 시작일
 
 min_units = top_container.number_input("세대수 하한(세대)", min_value=0, max_value=2000, step=50, value=300)
-cur_year = int(top_container.number_input(
-    "상단 요약 기준연도", min_value=2000, max_value=2100, step=1, value=int(pd.Timestamp.today().year)
-))
 
 if "run_clicked" not in st.session_state:
     st.session_state.run_clicked = False
@@ -590,7 +554,8 @@ if top_container.button("입주율 분석 실행", key="run_btn"):
 run = st.session_state.run_clicked
 
 # -------------------- 분석/시각화 --------------------
-def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
+# -------------------- [이동] 최상단: 연도별 누적 입주율 (기존 분석 함수에서 옮김) --------------------
+def show_yearly_cumulative(시작일, 종료일, min_units=0):
     시작일 = pd.to_datetime(시작일)
     종료일 = pd.to_datetime(종료일)
     month_cols = ensure_start_index(df)
@@ -672,6 +637,60 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
             "누적입주율": st.column_config.TextColumn("누적입주율"),
         },
     )
+
+
+def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
+    시작일 = pd.to_datetime(시작일)
+    종료일 = pd.to_datetime(종료일)
+    month_cols = ensure_start_index(df)
+
+    mask = (
+        (df["입주시작월"] >= 시작일)
+        & (df["입주시작월"] <= 종료일)
+        & (df["세대수"].fillna(0) >= min_units)
+    )
+    base = df.loc[mask & df["입주시작index"].notna()].copy()
+
+    def cum_until_end(row):
+        idx = int(row["입주시작index"])
+        months_elapsed = (종료일.year - row["공급승인일자"].year) * 12 + (종료일.month - row["공급승인일자"].month)
+        end_idx = min(len(month_cols) - 1, months_elapsed)
+        cols = month_cols[idx:end_idx + 1]
+        vals = [0 if pd.isna(row.get(c)) else row.get(c) for c in cols]
+        return sum(vals)
+
+    if not base.empty:
+        base["입주세대수"] = base.apply(cum_until_end, axis=1)
+        base["입주기간(개월)"] = base.apply(
+            lambda r: max(0, min(
+                len(month_cols) - 1,
+                (종료일.year - r["공급승인일자"].year) * 12 + (종료일.month - r["공급승인일자"].month),
+            ) - int(r["입주시작index"]) + 1) if pd.notna(r["입주시작index"]) else np.nan,
+            axis=1
+        )
+        base["입주율"] = base.apply(lambda r: _safe_ratio(r["입주세대수"], r["세대수"]), axis=1)
+        base["잔여세대수"] = (base["세대수"] - base["입주세대수"]).clip(lower=0)
+    else:
+        base["입주세대수"] = []
+        base["입주기간(개월)"] = []
+        base["입주율"] = []
+        base["잔여세대수"] = []
+
+    ybase = base.copy()
+    if not ybase.empty:
+        ybase["입주시작연도"] = pd.to_datetime(ybase["입주시작월"]).dt.year
+        yearly = (
+            ybase.groupby("입주시작연도")
+            .agg(단지수=("아파트명", "count"),
+                 총세대수=("세대수", "sum"),
+                 총입주세대수=("입주세대수", "sum"))
+            .reset_index()
+            .sort_values("입주시작연도")
+        )
+        yearly["잔여세대수"] = (yearly["총세대수"] - yearly["총입주세대수"]).clip(lower=0)
+        yearly["누적입주율"] = yearly.apply(lambda r: _safe_ratio(r["총입주세대수"], r["총세대수"]), axis=1)
+    else:
+        yearly = pd.DataFrame(columns=["입주시작연도","단지수","총세대수","총입주세대수","잔여세대수","누적입주율"])
 
     st.markdown("---")
 
@@ -1270,11 +1289,9 @@ with col2:
 
 st.markdown("##### ✨ Prepared by 마케팅본부 마케팅팀")
 
-# -------------------- [신규] 1) 현재연도 실적/계획 요약  2) 지도 --------------------
+# -------------------- 1) 연도별 누적 입주율 (최상단) --------------------
 if df is not None and not df.empty:
-    current_year_brief(cur_year, 종료일)
-    st.markdown("#### 🗺️ 공동주택 위치 지도")
-    render_main_map(build_top_map_options(시작일, 종료일, min_units), key="top_map")
+    show_yearly_cumulative(시작일, 종료일, min_units=min_units)
     st.markdown("---")
 
 # -------------------- [추가] 공동주택 검색 섹션 --------------------
@@ -1301,6 +1318,13 @@ with st.expander("🔍 공동주택 검색", expanded=False):
         elif search_btn and not search_keyword.strip():
             st.warning("검색어를 입력해 주세요.")
 # ── 검색 섹션 끝 ──────────────────────────────────────────────────
+
+# -------------------- 3) 지도 시각화 --------------------
+if df is not None and not df.empty:
+    st.markdown("#### 🗺️ 공동주택 위치 지도")
+    render_main_map(build_top_map_options(시작일, 종료일, min_units), key="top_map")
+
+
 
 st.markdown("---")
 
