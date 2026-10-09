@@ -1,6 +1,6 @@
 # app.py  ─ Streamlit (폰트 견고화 / 캐시초기화 / 최신 파일 자동선택 / TTL 캐시 / CSV다운로드
 #                    / 표 숫자 중앙정렬 / 그래프 라벨(현재·계획·부족·초과) / "연도별 → 요약표" 순서로 배치
-#                    / [신규] 최상단 '현재연도 실적/계획' 요약 / [신규] 위도·경도 기반 지도 시각화)
+#                    / [신규] 최상단: 현재연도 입주 실적/계획 요약 → 지도(입주율 ↔ 계획대비 편차) → 기존 내용)
 import os, logging, warnings, shutil, time, hashlib, io, glob
 from pathlib import Path
 
@@ -210,16 +210,26 @@ def load_df_from_path_or_buffer(path_str: str | None, buffer_bytes: bytes | None
 
 selected_path_str = None
 auto_hint = ""
+
+def _all_xlsx_candidates() -> list:
+    """패턴에 맞는 파일 + 폴더 내 모든 .xlsx (임시파일 ~$ 제외)"""
+    seen, out = set(), []
+    for pat in [pattern, "*.xlsx", "**/*.xlsx"]:
+        for f in glob.glob(pat, recursive=True):
+            fp = Path(f)
+            if fp.name.startswith("~$") or str(fp) in seen:
+                continue
+            seen.add(str(fp)); out.append(fp)
+    return out
+
 if load_way == "Repo 내 파일 사용":
     if auto_pick_latest:
         matches = sorted(glob.glob(pattern))
-        if matches:
+        coord_files = [fp for fp in _all_xlsx_candidates() if _has_coords(str(fp), fp.stat().st_mtime)]
+        if matches or coord_files:
             # 위도/경도가 포함된 파일을 우선, 그 다음 최신 수정시간 순
-            paths = sorted(
-                [Path(p) for p in matches],
-                key=lambda p: (_has_coords(str(p), p.stat().st_mtime), p.stat().st_mtime),
-                reverse=True,
-            )
+            pool = coord_files if coord_files else [Path(m) for m in matches]
+            paths = sorted(pool, key=lambda p: p.stat().st_mtime, reverse=True)
             selected_path_str = str(paths[0])
             auto_hint = f"(자동선택: {Path(selected_path_str).name} · 좌표포함 파일 우선)"
         else:
@@ -230,13 +240,32 @@ if load_way == "Repo 내 파일 사용":
 
 data_caption = ""
 ttl_key = ttl_bucket(ttl_minutes)
+
+def _attach_coords_from_repo(_df: pd.DataFrame, exclude: str | None) -> pd.DataFrame:
+    """선택된 파일에 좌표가 없으면, 폴더 내 다른 엑셀(좌표 포함)에서 아파트코드로 위도/경도를 붙임"""
+    if _df.empty or _df[COORD_COLS].notna().any().any():
+        return _df
+    for fp in sorted(_all_xlsx_candidates(), key=lambda q: q.stat().st_mtime, reverse=True):
+        if exclude and str(fp) == exclude:
+            continue
+        if not _has_coords(str(fp), fp.stat().st_mtime):
+            continue
+        other = load_df_from_path_or_buffer(str(fp), None, file_digest_from_path(fp), ttl_key)
+        loc = other[["아파트코드", *COORD_COLS]].dropna(subset=COORD_COLS).drop_duplicates("아파트코드")
+        merged = _df.drop(columns=COORD_COLS).merge(loc, on="아파트코드", how="left")
+        return merged
+    return _df
+
 if load_way == "Repo 내 파일 사용":
     p = Path(selected_path_str) if selected_path_str else None
     if p and p.exists():
         digest = file_digest_from_path(p)
         df = load_df_from_path_or_buffer(str(p), None, digest, ttl_key)
+        df = _attach_coords_from_repo(df, str(p))
         mtime = time.strftime("%Y-%m-%d %H:%M", time.localtime(p.stat().st_mtime))
-        data_caption = f"📄 Source=Repo:{p.name} {auto_hint} | ver={digest} | updated={mtime} | {ttl_key}"
+        n_coord = int(df[COORD_COLS].notna().all(axis=1).sum()) if not df.empty else 0
+        data_caption = (f"📄 Source=Repo:{p.name} {auto_hint} | ver={digest} | updated={mtime} | {ttl_key}"
+                        f" | 좌표 {n_coord}/{len(df)}단지")
     else:
         df = pd.DataFrame()
         data_caption = f"📄 Source=Repo: (경로 없음) | {ttl_key}"
@@ -302,26 +331,23 @@ def _format_pct_cols(df_in, cols):
             df[c] = df[c].apply(lambda x: "" if pd.isna(x) else f"{x*100:.1f}%")
     return df
 
-# -------------------- 사업계획(공통) --------------------
-# 입주시작 n개월차 누적 입주율 계획(%)  ← 모든 섹션에서 이 한 곳을 참조
-PLAN_PCT = {1: 9.29, 2: 43.25, 3: 62.75, 4: 72.61, 5: 78.17, 6: 81.56, 7: 84.28, 8: 86.07, 9: 87.86}
-PLAN = {k: min(1.0, v / 100) for k, v in PLAN_PCT.items()}
+# -------------------- [신규] 상단 요약/지도용 공통 헬퍼 (기존 함수는 수정하지 않음) --------------------
+PLAN_PCT_TOP = {1: 9.29, 2: 43.25, 3: 62.75, 4: 72.61, 5: 78.17, 6: 81.56, 7: 84.28, 8: 86.07, 9: 87.86}
+_PLAN_TOP = {k: min(1.0, v / 100) for k, v in PLAN_PCT_TOP.items()}
 
-def _plan_ratio(m):
+def _plan_ratio_hold(m):
     """n개월차 계획 누적 입주율(0~1). 계획표는 1~9개월만 존재.
-    - 10~12개월: 9개월 계획값 유지(계획표 공란 구간을 NaN으로 두면 단지가 통째로 빠지기 때문)
-    - 13개월 이상: 100%로 간주"""
+    10~12개월: 9개월 계획값 유지 / 13개월 이상: 100% (※ 상단 요약·지도 전용)"""
     m = int(m)
-    if m in PLAN:
-        return PLAN[m]
+    if m in _PLAN_TOP:
+        return _PLAN_TOP[m]
     if 9 < m <= 12:
-        return PLAN[9]
+        return _PLAN_TOP[9]
     if m > 12:
         return 1.0
     return np.nan
 
-def _cum_rate(row, m, month_cols):
-    """입주시작월부터 m개월 누적 입주율"""
+def _cum_rate_top(row, m, month_cols):
     idx = int(row["입주시작index"])
     cols = month_cols[idx: idx + m]
     num = sum([0 if pd.isna(row.get(c)) else row.get(c) for c in cols])
@@ -333,49 +359,38 @@ def _months_elapsed(row, ref_date):
     delta = (ref_date.year - row["입주시작월"].year) * 12 + (ref_date.month - row["입주시작월"].month) + 1
     return max(0, delta)
 
-# -------------------- 지도 시각화(공통) --------------------
 def _map_zoom(lats, lons):
     span = max(float(np.ptp(lons)), float(np.ptp(lats)) * 1.6, 0.005)
     return float(np.clip(np.log2(560 / span), 8, 16))
 
-def render_coord_map(map_df, color_options, key, hover_fields=None, height=560, default_show_names=False):
-    """공동주택 위치 지도.
-    map_df       : 아파트명 / 세대수 / 위도 / 경도 + 색상 컬럼을 가진 DataFrame
-    color_options: {라벨: (컬럼명, 'rate'|'diff')}  rate=0~1 비율(0~100% 고정), diff=pp 편차(0 중심 대칭)
-    hover_fields : [(라벨, 컬럼, 'int'|'pct'|'pp'|'date'|'text')]  마우스 오버 시 표시할 항목
-    """
-    if map_df is None or map_df.empty:
+def render_main_map(options, key, height=560):
+    """options: {라벨: dict(df=, col=, mode='rate'|'diff', hover=[(라벨, 컬럼, 종류)])}
+    좌측 상단 라디오 버튼으로 색상/대상 전환. 점 크기=세대수."""
+    labels = list(options.keys())
+    c1, c2 = st.columns([3, 1])
+    sel = c1.radio("🎨 지도 보기", labels, horizontal=True, key=f"{key}_sel") if len(labels) > 1 else labels[0]
+    show_names = c2.checkbox("단지명 표시", value=False, key=f"{key}_names")
+
+    opt = options[sel]
+    m_all = opt["df"]
+    if m_all is None or m_all.empty:
         st.info("🗺️ 지도에 표시할 단지가 없어.")
         return
-    if map_df[COORD_COLS].notna().sum().min() == 0:
+    if m_all[COORD_COLS].notna().sum().min() == 0:
         st.info("🗺️ 위도/경도 데이터가 없어서 지도를 표시할 수 없어. (좌표가 포함된 엑셀을 사용해 줘)")
         return
+    m = m_all.dropna(subset=COORD_COLS + [opt["col"]]).copy()
+    n_missing = len(m_all) - len(m)
+    if m.empty:
+        st.info("🗺️ 지도에 표시할 단지가 없어.")
+        return
+    vals = pd.to_numeric(m[opt["col"]], errors="coerce")
 
-    m = map_df.dropna(subset=COORD_COLS).copy()
-    n_missing = len(map_df) - len(m)
-
-    c1, c2 = st.columns([3, 1])
-    labels = list(color_options.keys())
-    if len(labels) > 1:
-        color_label = c1.radio("🎨 색상 기준", labels, horizontal=True, key=f"{key}_color")
+    if opt["mode"] == "rate":
+        cmin, cmax, cbar = 0.0, 1.0, dict(title=sel, tickformat=".0%")
     else:
-        color_label = labels[0]
-    show_names = c2.checkbox("단지명 표시", value=default_show_names, key=f"{key}_names")
-
-    col_name, mode = color_options[color_label]
-    m = m.dropna(subset=[col_name]) if m[col_name].notna().any() else m
-    vals = pd.to_numeric(m[col_name], errors="coerce")
-
-    if mode == "rate":
-        cmin, cmax = 0.0, 1.0
-        scale = "RdYlGn"
-        cbar = dict(title=color_label, tickformat=".0%")
-    else:
-        lim = float(np.nanmax(np.abs(vals))) if vals.notna().any() else 1.0
-        lim = max(lim, 1.0)
-        cmin, cmax = -lim, lim
-        scale = "RdYlGn"
-        cbar = dict(title=color_label, ticksuffix="pp")
+        lim = max(float(np.nanmax(np.abs(vals))), 1.0)
+        cmin, cmax, cbar = -lim, lim, dict(title=sel, ticksuffix="pp")
 
     units = pd.to_numeric(m["세대수"], errors="coerce").fillna(0).clip(lower=0)
     r = np.sqrt(units.to_numpy())
@@ -394,28 +409,23 @@ def render_coord_map(map_df, color_options, key, hover_fields=None, height=560, 
             return pd.to_datetime(v).strftime("%Y-%m-%d")
         return str(v)
 
-    hover_fields = hover_fields or []
     hover = []
     for _, row in m.iterrows():
         lines = [f"<b>{row['아파트명']}</b>", f"세대수: {_fmt(row['세대수'], 'int')}"]
-        for lab, col, kind in hover_fields:
+        for lab, col, kind in opt.get("hover", []):
             if col in m.columns:
                 lines.append(f"{lab}: {_fmt(row[col], kind)}")
         hover.append("<br>".join(lines))
 
-    marker = dict(
-        size=sizes, color=vals, colorscale=scale, cmin=cmin, cmax=cmax,
-        colorbar=cbar, opacity=0.85,
-    )
     common = dict(
         lat=m["위도"], lon=m["경도"], mode="markers+text" if show_names else "markers",
-        marker=marker, text=m["아파트명"] if show_names else None, textposition="top center",
-        textfont=dict(size=10), hovertext=hover, hoverinfo="text", name="",
+        marker=dict(size=sizes, color=vals, colorscale="RdYlGn", cmin=cmin, cmax=cmax, colorbar=cbar, opacity=0.85),
+        text=m["아파트명"] if show_names else None, textposition="top center", textfont=dict(size=10),
+        hovertext=hover, hoverinfo="text", name="",
     )
-
-    fig = go.Figure()
     center = dict(lat=float(m["위도"].mean()), lon=float(m["경도"].mean()))
     zoom = _map_zoom(m["위도"], m["경도"])
+    fig = go.Figure()
     if hasattr(go, "Scattermap"):  # plotly >= 5.24
         fig.add_trace(go.Scattermap(**common))
         fig.update_layout(map=dict(style="open-street-map", center=center, zoom=zoom))
@@ -423,12 +433,82 @@ def render_coord_map(map_df, color_options, key, hover_fields=None, height=560, 
         fig.add_trace(go.Scattermapbox(**common))
         fig.update_layout(mapbox=dict(style="open-street-map", center=center, zoom=zoom))
     fig.update_layout(margin=dict(l=0, r=0, t=0, b=0), height=height)
-
     st.plotly_chart(fig, use_container_width=True, key=f"{key}_chart")
-    cap = f"🔵 원 크기 = 세대수 · 색 = {color_label} · 표시 {len(m)}개 단지"
+    cap = f"🔵 원 크기 = 세대수 · 색 = {sel} · 표시 {len(m)}개 단지"
     if n_missing:
-        cap += f" · 좌표 없음 {n_missing}개 제외"
+        cap += f" · 좌표/값 없음 {n_missing}개 제외"
     st.caption(cap)
+
+def build_top_map_options(시작일, 종료일, min_units):
+    """지도용 데이터: (1) 분석기간 입주시작 단지의 입주율 (2) 2025년 이후 입주시작 단지의 계획 대비 편차"""
+    month_cols = ensure_start_index(df)
+    ok = df["입주시작index"].notna() & df["세대수"].notna() & (df["세대수"] >= min_units)
+
+    # (1) 입주율 — '입주현황 요약표'와 동일 기준(분석기간 내 입주시작, 종료일까지 누적)
+    a = df[ok & (df["입주시작월"] >= 시작일) & (df["입주시작월"] <= 종료일)].copy()
+    if not a.empty:
+        a["입주세대수"] = a.apply(
+            lambda r: sum(0 if pd.isna(r.get(c)) else r.get(c)
+                          for c in month_cols[int(r["입주시작index"]): int(r["입주시작index"]) + max(1, _months_elapsed(r, 종료일))]),
+            axis=1)
+        a["입주율"] = a.apply(lambda r: _cum_rate_top(r, max(1, _months_elapsed(r, 종료일)), month_cols), axis=1)
+        a["잔여세대수"] = (a["세대수"] - a["입주세대수"]).clip(lower=0)
+
+    # (2) 계획 대비 편차 — '계획 대비 저조/우수' 섹션과 동일 기준(2025-01 이후 입주시작, 종료일 기준)
+    b = df[ok & (df["입주시작월"] >= pd.Timestamp("2025-01-01")) & (df["입주시작월"] <= 종료일)].copy()
+    if not b.empty:
+        b["경과개월"] = b.apply(lambda r: _months_elapsed(r, 종료일), axis=1)
+        b = b[b["경과개월"] > 0].copy()
+        b["실제누적(비율)"] = b.apply(lambda r: _cum_rate_top(r, int(r["경과개월"]), month_cols), axis=1)
+        b["계획누적(비율)"] = b["경과개월"].apply(_plan_ratio_hold)
+        b["실제누적세대"] = (b["실제누적(비율)"] * b["세대수"]).round()
+        b["계획누적세대"] = (b["계획누적(비율)"] * b["세대수"]).round()
+        b["부족세대"] = (b["계획누적세대"] - b["실제누적세대"]).clip(lower=0)
+        b["편차(pp)"] = (b["실제누적(비율)"] - b["계획누적(비율)"]) * 100
+
+    return {
+        "입주율": dict(df=a, col="입주율", mode="rate", hover=[
+            ("입주시작월", "입주시작월", "date"), ("입주세대수", "입주세대수", "int"),
+            ("잔여세대수", "잔여세대수", "int"), ("입주율", "입주율", "pct")]),
+        "계획 대비 편차": dict(df=b, col="편차(pp)", mode="diff", hover=[
+            ("입주시작월", "입주시작월", "date"), ("경과개월", "경과개월", "int"),
+            ("실제누적세대", "실제누적세대", "int"), ("계획누적세대", "계획누적세대", "int"),
+            ("부족세대", "부족세대", "int"), ("실제누적", "실제누적(비율)", "pct"),
+            ("계획누적", "계획누적(비율)", "pct"), ("편차", "편차(pp)", "pp")]),
+    }
+
+# -------------------- [신규] 최상단 간략 요약: 현재연도 실적/계획 --------------------
+def current_year_brief(year, ref_date):
+    """year 에 입주를 시작한 '전체 단지'(세대수 하한 미적용)를 분모로,
+    기준일(ref_date)까지의 실제 입주세대 vs 사업계획 누적 세대를 한 줄로 요약"""
+    month_cols = ensure_start_index(df)
+    y_start = pd.Timestamp(year=year, month=1, day=1)
+    ref = min(pd.to_datetime(ref_date), pd.Timestamp(year=year, month=12, day=31))
+    st.header(f"📅 {year}년 입주 실적 / 계획")
+    if ref < y_start:
+        st.info(f"⚠️ 분석 종료일이 {year}년 이전이라 표시할 실적이 없어.")
+        return
+    c = df[(df["입주시작월"] >= y_start) & (df["입주시작월"] <= ref)
+           & df["입주시작index"].notna() & df["세대수"].notna()].copy()
+    if c.empty:
+        st.info(f"⚠️ {year}년에 입주를 시작한 단지가 없어.")
+        return
+
+    def _units(row):  # 입주시작월 ~ 기준월까지 실제 입주세대 합
+        m = _months_elapsed(row, ref); idx = int(row["입주시작index"])
+        return sum(0 if pd.isna(row.get(col)) else row.get(col) for col in month_cols[idx: idx + m])
+
+    c["실적"] = c.apply(_units, axis=1)
+    c["계획"] = c["세대수"] * c.apply(lambda r: _plan_ratio_hold(_months_elapsed(r, ref)), axis=1)
+    n, tot = len(c), int(c["세대수"].sum())
+    act, pln = int(c["실적"].sum()), int(round(c["계획"].sum()))
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("전체 단지 / 세대수(분모)", f"{n:,}개 / {tot:,}세대")
+    k2.metric(f"계획 누적 ({ref:%-m}월 기준)", f"{pln:,}세대", f"계획률 {pln/tot*100:.1f}%", delta_color="off")
+    k3.metric(f"실적 누적 ({ref:%-m}월 기준)", f"{act:,}세대", f"입주율 {act/tot*100:.1f}%", delta_color="off")
+    k4.metric("계획 대비", f"{act-pln:+,}세대", f"달성률 {(act/pln*100 if pln else 0):.1f}%")
+    st.caption(f"{year}년 입주시작 전체 단지(세대수 하한 미적용) · 실적은 {ref:%Y-%m-%d}까지 입주세대 · "
+               f"계획은 단지별 경과개월 사업계획 누적율 적용 · 입주율/계획률 분모 = 전체 단지 세대수")
 
 # -------------------- 종료일 디폴트: 엑셀 내 가장 최신 날짜 찾기 --------------------
 def _last_data_date_from_df(_df: pd.DataFrame) -> pd.Timestamp | None:
@@ -634,16 +714,6 @@ def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
     csv = result_df.to_csv(index=False).encode("utf-8-sig")
     st.download_button("⬇️ 요약표 CSV 다운로드", data=csv, file_name="occupancy_summary.csv", mime="text/csv")
 
-    st.markdown("#### 🗺️ 입주율 지도")
-    map_src = base.dropna(subset=["입주세대수"]).copy()
-    render_coord_map(
-        map_src,
-        {"입주율": ("입주율", "rate")},
-        key="map_period",
-        hover_fields=[("입주시작월", "입주시작월", "date"), ("입주세대수", "입주세대수", "int"),
-                      ("잔여세대수", "잔여세대수", "int"), ("입주율", "입주율", "pct")],
-    )
-
     return result_df
 
 def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
@@ -692,9 +762,10 @@ def plot_yearly_avg_occupancy_with_plan(start_date, end_date, min_units=0):
             row=1, col=1
         )
 
+    PLAN = {1: 9.29, 2: 43.25, 3: 62.75, 4: 72.61, 5: 78.17, 6: 81.56, 7: 84.28, 8: 86.07, 9: 87.86}
     plan_x = list(range(1, MAX_M + 1))
     plan_x_str = [f"{i}개월" for i in plan_x]
-    plan_y = [PLAN[i] for i in plan_x]
+    plan_y = [min(1.0, PLAN[i] / 100) for i in plan_x]
 
     fig.add_trace(
         go.Scatter(x=plan_x_str, y=plan_y, mode='lines+markers', name="사업계획 기준", line=dict(dash='dash', color='magenta')),
@@ -884,6 +955,17 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     if cohort.empty:
         st.info("✅ 대상 단지가 없어."); return pd.DataFrame()
 
+    PLAN = {1: 9.29, 2: 43.25, 3: 62.75, 4: 72.61, 5: 78.17, 6: 81.56, 7: 84.28, 8: 86.07, 9: 87.86}
+    PLAN = {k: min(1.0, v / 100) for k, v in PLAN.items()}
+
+    # 🛠 12개월 초과 시 계획을 100%로 간주 (PLAN 원본은 1~9개월치만 존재)
+    def _plan_ratio(m):
+        if m in PLAN:
+            return PLAN[m]
+        if m > 12:
+            return 1.0
+        return np.nan
+
     def cum_rate(row, m):
         idx = int(row["입주시작index"]); cols = month_cols[idx: idx + m]
         num = sum([0 if pd.isna(row.get(c)) else row.get(c) for c in cols]); den = row["세대수"]
@@ -944,12 +1026,12 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     out = out[
         ["아파트명","세대수","입주시작월","경과개월(선택일기준)",
          "실제누적세대(선택일)","계획누적세대(선택일)","현재_부족세대",
-         "실제누적(선택일)","계획누적(선택일)","편차(pp)","위도","경도"]
+         "실제누적(선택일)","계획누적(선택일)","편차(pp)"]
     ].sort_values(by="편차(pp)", ascending=sort_asc)
 
     disp_limit = len(out) if view_mode == "전체 단지 보기" else top_n
 
-    disp = out.head(disp_limit).drop(columns=COORD_COLS).copy()
+    disp = out.head(disp_limit).copy()
     disp["입주시작월"] = _fmt_date_str(disp["입주시작월"])
     disp = _format_pct_cols(disp, ["실제누적(선택일)", "계획누적(선택일)"])
 
@@ -967,17 +1049,6 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
             "계획누적(선택일)": st.column_config.TextColumn("계획누적(선택일)"),
             "편차(pp)": st.column_config.NumberColumn("편차(pp)", format="%+.1f"),
         },
-    )
-
-    st.markdown("#### 🗺️ 위치 지도")
-    render_coord_map(
-        out.head(disp_limit),
-        {"계획 대비 편차(pp)": ("편차(pp)", "diff"), "실제 누적 입주율": ("실제누적(선택일)", "rate")},
-        key="map_under",
-        hover_fields=[("경과개월", "경과개월(선택일기준)", "int"), ("실제누적세대", "실제누적세대(선택일)", "int"),
-                      ("계획누적세대", "계획누적세대(선택일)", "int"), ("부족세대", "현재_부족세대", "int"),
-                      ("실제누적", "실제누적(선택일)", "pct"), ("계획누적", "계획누적(선택일)", "pct"),
-                      ("편차", "편차(pp)", "pp")],
     )
 
     fig_height = max(3.3, len(disp) * 0.35)
@@ -1047,138 +1118,22 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     ax2.grid(alpha=0.3); fig2.tight_layout(); apply_korean_font(fig2); st.pyplot(fig2, use_container_width=True)
     return out
 
-# -------------------- [신규] 최상단 간략 요약: 현재연도 실적/계획 --------------------
-def current_year_brief(year, ref_date):
-    """year 에 입주를 시작한 '전체 단지'(세대수 하한 미적용)를 분모로,
-    기준일(ref_date)까지의 실제 입주세대 vs 사업계획 누적 세대를 한 줄로 요약"""
-    month_cols = ensure_start_index(df)
-    y_start = pd.Timestamp(year=year, month=1, day=1)
-    ref = min(pd.to_datetime(ref_date), pd.Timestamp(year=year, month=12, day=31))
-    st.header(f"📅 {year}년 입주 실적 / 계획")
-    if ref < y_start:
-        st.info(f"⚠️ 분석 종료일이 {year}년 이전이라 표시할 실적이 없어.")
-        return
-    c = df[(df["입주시작월"] >= y_start) & (df["입주시작월"] <= ref)
-           & df["입주시작index"].notna() & df["세대수"].notna()].copy()
-    if c.empty:
-        st.info(f"⚠️ {year}년에 입주를 시작한 단지가 없어.")
-        return
-
-    def _units(row):  # 입주시작월 ~ 기준월까지 실제 입주세대 합
-        m = _months_elapsed(row, ref); idx = int(row["입주시작index"])
-        return sum(0 if pd.isna(row.get(col)) else row.get(col) for col in month_cols[idx: idx + m])
-
-    c["실적"] = c.apply(_units, axis=1)
-    c["계획"] = c["세대수"] * c.apply(lambda r: _plan_ratio(_months_elapsed(r, ref)), axis=1)
-    n, tot = len(c), int(c["세대수"].sum())
-    act, pln = int(c["실적"].sum()), int(round(c["계획"].sum()))
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("전체 단지 / 세대수(분모)", f"{n:,}개 / {tot:,}세대")
-    k2.metric(f"계획 누적 ({ref:%-m}월 기준)", f"{pln:,}세대", f"계획률 {pln/tot*100:.1f}%", delta_color="off")
-    k3.metric(f"실적 누적 ({ref:%-m}월 기준)", f"{act:,}세대", f"입주율 {act/tot*100:.1f}%", delta_color="off")
-    k4.metric("계획 대비", f"{act-pln:+,}세대", f"달성률 {(act/pln*100 if pln else 0):.1f}%")
-    st.caption(f"{year}년 입주시작 전체 단지(세대수 하한 미적용) · 실적은 {ref:%Y-%m-%d}까지 입주세대 · "
-               f"계획은 단지별 경과개월 사업계획 누적율 적용 · 입주율/계획률 분모 = 전체 단지 세대수")
-
-# -------------------- [신규] 현재연도 단지별 상세 (지도/표/그래프) --------------------
-def current_year_plan_vs_actual(year, ref_date, min_units=0):
-    """year 에 입주를 시작한 단지의 '계획 누적 vs 실제 누적' 요약 (KPI / 지도 / 표 / 그래프)"""
-    month_cols = ensure_start_index(df)
-    y_start = pd.Timestamp(year=year, month=1, day=1)
-    y_end = pd.Timestamp(year=year, month=12, day=31)
-    ref = min(pd.to_datetime(ref_date), y_end)
-
-    st.subheader(f"🏘️ {year}년 입주시작 단지 상세 (세대수 ≥ {min_units})")
-    if ref < y_start:
-        st.info(f"⚠️ 분석 종료일({pd.to_datetime(ref_date):%Y-%m-%d})이 {year}년 이전이라 표시할 실적이 없어.")
-        return pd.DataFrame()
-    st.caption(f"기준일 {ref:%Y-%m-%d} · {year}년에 입주를 시작한 단지 · 세대수 ≥ {min_units} "
-               f"· 계획 = 사업계획 n개월차 누적 입주율")
-
-    cohort = df[
-        (df["입주시작월"] >= y_start) & (df["입주시작월"] <= ref)
-        & df["입주시작index"].notna() & df["세대수"].notna() & (df["세대수"] >= min_units)
-    ].copy()
-    if cohort.empty:
-        st.info(f"⚠️ {year}년에 입주를 시작한 단지(조건 충족)가 없어.")
-        return pd.DataFrame()
-
-    cohort["경과개월"] = cohort.apply(lambda r: _months_elapsed(r, ref), axis=1)
-    cohort["실제누적(비율)"] = cohort.apply(lambda r: _cum_rate(r, int(r["경과개월"]), month_cols), axis=1)
-    cohort["계획누적(비율)"] = cohort["경과개월"].apply(_plan_ratio)
-    cohort["실제누적세대"] = (cohort["실제누적(비율)"] * cohort["세대수"]).round().astype("Int64")
-    cohort["계획누적세대"] = (cohort["계획누적(비율)"] * cohort["세대수"]).round().astype("Int64")
-    cohort["과부족세대"] = cohort["실제누적세대"] - cohort["계획누적세대"]
-    cohort["현재_부족세대"] = (-cohort["과부족세대"]).clip(lower=0).astype("Int64")
-    cohort["편차(pp)"] = (cohort["실제누적(비율)"] - cohort["계획누적(비율)"]) * 100
-
-    # ── 탭: 지도 / 표 / 그래프 ──
-    t_map, t_tbl, t_chart = st.tabs(["🗺️ 지도", "📋 단지별 표", "📊 계획 vs 실적 그래프"])
-
-    with t_map:
-        render_coord_map(
-            cohort,
-            {"계획 대비 편차(pp)": ("편차(pp)", "diff"), "실제 누적 입주율": ("실제누적(비율)", "rate")},
-            key="map_cur_year",
-            hover_fields=[("입주시작월", "입주시작월", "date"), ("경과개월", "경과개월", "int"),
-                          ("실제누적세대", "실제누적세대", "int"), ("계획누적세대", "계획누적세대", "int"),
-                          ("부족세대", "현재_부족세대", "int"), ("실제누적", "실제누적(비율)", "pct"),
-                          ("계획누적", "계획누적(비율)", "pct"), ("편차", "편차(pp)", "pp")],
-            default_show_names=True,
-        )
-
-    show = cohort.sort_values("편차(pp)", ascending=True)
-    with t_tbl:
-        disp = show[["아파트명", "세대수", "입주시작월", "경과개월", "실제누적세대", "계획누적세대",
-                     "현재_부족세대", "실제누적(비율)", "계획누적(비율)", "편차(pp)"]].copy()
-        disp["입주시작월"] = _fmt_date_str(disp["입주시작월"])
-        disp = _format_pct_cols(disp, ["실제누적(비율)", "계획누적(비율)"])
-        st.dataframe(
-            disp, use_container_width=True, hide_index=True,
-            column_config={
-                "세대수": st.column_config.NumberColumn("세대수", format="%,d"),
-                "경과개월": st.column_config.NumberColumn("경과개월", format="%d"),
-                "실제누적세대": st.column_config.NumberColumn("실제누적세대", format="%,d"),
-                "계획누적세대": st.column_config.NumberColumn("계획누적세대", format="%,d"),
-                "현재_부족세대": st.column_config.NumberColumn("현재_부족세대", format="%,d"),
-                "실제누적(비율)": st.column_config.TextColumn("실제누적(비율)"),
-                "계획누적(비율)": st.column_config.TextColumn("계획누적(비율)"),
-                "편차(pp)": st.column_config.NumberColumn("편차(pp)", format="%+.1f"),
-            },
-        )
-        st.download_button(
-            f"⬇️ {year}년 실적/계획 CSV 다운로드",
-            data=show.drop(columns=COORD_COLS).to_csv(index=False).encode("utf-8-sig"),
-            file_name=f"occupancy_{year}_plan_vs_actual.csv", mime="text/csv", key="dl_cur_year",
-        )
-
-    with t_chart:
-        pdf = show.copy()
-        fig, ax = plt.subplots(figsize=(8.5, max(2.6, len(pdf) * 0.42) + 1.0))
-        ylab = [f"{a} ({h}세대) · {m}개월차" for a, h, m in zip(pdf["아파트명"], pdf["세대수"], pdf["경과개월"])]
-        ax.barh(ylab, pdf["계획누적세대"].fillna(0).astype(float), height=0.7, color="#AEC6E0", label="계획 누적 세대")
-        ax.barh(ylab, pdf["실제누적세대"].fillna(0).astype(float), height=0.35, color="#1B3358", label="실제 누적 세대")
-        xmax = max(float(pdf["계획누적세대"].fillna(0).max()), float(pdf["실제누적세대"].fillna(0).max()), 1.0)
-        ax.set_xlim(0, xmax * 1.40)
-        ax.set_title(f"{year}년 입주시작 단지 — 계획 vs 실적 누적 세대수 (기준일 {ref:%Y-%m-%d})", fontsize=11)
-        ax.tick_params(axis="both", labelsize=8)
-        ax.legend(loc="upper right", bbox_to_anchor=(1.0, -0.12), ncol=2, fontsize=8, frameon=False)
-        pad = max(5, xmax * 0.015)
-        for yi, (a, p_, lack) in enumerate(zip(pdf["실제누적세대"].fillna(0), pdf["계획누적세대"].fillna(0),
-                                              pdf["현재_부족세대"].fillna(0))):
-            a, p_, lack = int(a), int(p_), int(lack)
-            d = f"부족 {lack:,}" if p_ > a else (f"초과 {a-p_:,}" if a > p_ else "계획 달성")
-            ax.text(max(a, p_) + pad, yi, f"{a:,}세대 (계획 {p_:,} | {d})", va="center", ha="left", fontsize=8.5, alpha=0.9)
-        ax.invert_yaxis(); ax.grid(axis="x", alpha=0.3)
-        fig.tight_layout(); apply_korean_font(fig); st.pyplot(fig, use_container_width=True)
-
-    return cohort
-
 # -------------------- [추가] 공동주택 검색 함수 --------------------
 def search_complex(keyword: str, ref_date: pd.Timestamp, MAX_M: int = 9):
     """keyword 로 아파트명을 부분검색하여 계획 vs 실적 요약을 표시"""
     month_cols = ensure_start_index(df)
     ref_date = pd.to_datetime(ref_date)
+
+    PLAN = {1: 9.29, 2: 43.25, 3: 62.75, 4: 72.61, 5: 78.17, 6: 81.56, 7: 84.28, 8: 86.07, 9: 87.86}
+    PLAN = {k: min(1.0, v / 100) for k, v in PLAN.items()}
+
+    # 🛠 12개월 초과 시 계획을 100%로 간주 (PLAN 원본은 1~9개월치만 존재)
+    def _plan_ratio(m):
+        if m in PLAN:
+            return PLAN[m]
+        if m > 12:
+            return 1.0
+        return np.nan
 
     matched = df[df["아파트명"].astype(str).str.contains(keyword, na=False)].copy()
 
@@ -1227,8 +1182,6 @@ def search_complex(keyword: str, ref_date: pd.Timestamp, MAX_M: int = 9):
             "실제누적(비율)":     actual,
             "계획누적(비율)":     plan,
             "편차(pp)":           diff,
-            "위도":               r.get("위도", np.nan),
-            "경도":               r.get("경도", np.nan),
         })
 
     if not rows_out:
@@ -1238,7 +1191,7 @@ def search_complex(keyword: str, ref_date: pd.Timestamp, MAX_M: int = 9):
     result = pd.DataFrame(rows_out)
 
     # ── 표 표시 ──
-    disp = result.drop(columns=COORD_COLS).copy()
+    disp = result.copy()
     disp["입주시작월"] = _fmt_date_str(disp["입주시작월"])
     disp = _format_pct_cols(disp, ["실제누적(비율)", "계획누적(비율)"])
 
@@ -1255,17 +1208,6 @@ def search_complex(keyword: str, ref_date: pd.Timestamp, MAX_M: int = 9):
             "계획누적(비율)": st.column_config.TextColumn("계획누적(비율)"),
             "편차(pp)":       st.column_config.NumberColumn("편차(pp)",       format="%+.1f"),
         },
-    )
-
-    # ── 검색 결과 지도 ──
-    render_coord_map(
-        result,
-        {"실제 누적 입주율": ("실제누적(비율)", "rate"), "계획 대비 편차(pp)": ("편차(pp)", "diff")},
-        key=f"map_search_{abs(hash(keyword))}",
-        hover_fields=[("경과개월", "경과개월", "int"), ("실제누적세대", "실제누적세대", "int"),
-                      ("계획누적세대", "계획누적세대", "int"), ("실제누적", "실제누적(비율)", "pct"),
-                      ("편차", "편차(pp)", "pp")],
-        height=420, default_show_names=True,
     )
 
     # ── 계획 vs 실적 누적 세대수 가로막대 그래프 ──
@@ -1328,10 +1270,11 @@ with col2:
 
 st.markdown("##### ✨ Prepared by 마케팅본부 마케팅팀")
 
-# -------------------- [신규] 최상단: 현재연도 실적/계획 --------------------
+# -------------------- [신규] 1) 현재연도 실적/계획 요약  2) 지도 --------------------
 if df is not None and not df.empty:
     current_year_brief(cur_year, 종료일)
-    current_year_plan_vs_actual(cur_year, 종료일, min_units=min_units)
+    st.markdown("#### 🗺️ 공동주택 위치 지도")
+    render_main_map(build_top_map_options(시작일, 종료일, min_units), key="top_map")
     st.markdown("---")
 
 # -------------------- [추가] 공동주택 검색 섹션 --------------------
