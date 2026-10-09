@@ -545,13 +545,6 @@ if 시작일 > 종료일:
 
 min_units = top_container.number_input("세대수 하한(세대)", min_value=0, max_value=2000, step=50, value=300)
 
-if "run_clicked" not in st.session_state:
-    st.session_state.run_clicked = False
-
-if top_container.button("입주율 분석 실행", key="run_btn"):
-    st.session_state.run_clicked = True
-
-run = st.session_state.run_clicked
 
 # -------------------- 분석/시각화 --------------------
 # -------------------- [이동] 최상단: 연도별 누적 입주율 (기존 분석 함수에서 옮김) --------------------
@@ -625,18 +618,19 @@ def show_yearly_cumulative(시작일, 종료일, min_units=0):
         if c in yearly_disp.columns:
             yearly_disp[c] = pd.to_numeric(yearly_disp[c], errors="coerce").round().astype("Int64")
     yearly_disp = _format_pct_cols(yearly_disp, ["누적입주율"])
-    st.dataframe(
-        yearly_disp,
-        use_container_width=True,
-        column_config={
-            "입주시작연도": st.column_config.NumberColumn("입주시작연도", format="%d"),
-            "단지수": st.column_config.NumberColumn("단지수", format="%,d"),
-            "총세대수": st.column_config.NumberColumn("총세대수", format="%,d"),
-            "총입주세대수": st.column_config.NumberColumn("총입주세대수", format="%,d"),
-            "잔여세대수": st.column_config.NumberColumn("잔여세대수", format="%,d"),
-            "누적입주율": st.column_config.TextColumn("누적입주율"),
-        },
-    )
+    with st.expander("📋 세부내용 보기 (연도별 표)", expanded=False):
+        st.dataframe(
+            yearly_disp,
+            use_container_width=True,
+            column_config={
+                "입주시작연도": st.column_config.NumberColumn("입주시작연도", format="%d"),
+                "단지수": st.column_config.NumberColumn("단지수", format="%,d"),
+                "총세대수": st.column_config.NumberColumn("총세대수", format="%,d"),
+                "총입주세대수": st.column_config.NumberColumn("총입주세대수", format="%,d"),
+                "잔여세대수": st.column_config.NumberColumn("잔여세대수", format="%,d"),
+                "누적입주율": st.column_config.TextColumn("누적입주율"),
+            },
+        )
 
 
 def analyze_occupancy_by_period(시작일, 종료일, min_units=0):
@@ -1295,7 +1289,7 @@ if df is not None and not df.empty:
     st.markdown("---")
 
 # -------------------- [추가] 공동주택 검색 섹션 --------------------
-with st.expander("🔍 공동주택 검색", expanded=False):
+with st.expander("🔍 공동주택 검색", expanded=True):
     if df.empty:
         st.info("데이터를 먼저 불러와 주세요.")
     else:
@@ -1331,16 +1325,19 @@ st.markdown("---")
 if chosen_font: st.caption(f"한글 폰트 적용: {chosen_font}")
 st.caption(f"{data_caption} | code_ver={CODE_VER}")
 
-if run:
-    if df.empty:
-        st.error("데이터를 먼저 불러와 주세요.")
-    else:
-        # 1 & 2. 연도별 누적 입주율 & 입주현황 요약표
-        analyze_occupancy_by_period(시작일, 종료일, min_units=min_units)
+if df.empty:
+    st.error("데이터를 먼저 불러와 주세요.")
+else:
+    # 1 & 2. 입주현황 요약표 (연도별 누적 입주율은 최상단으로 이동)
+    analyze_occupancy_by_period(시작일, 종료일, min_units=min_units)
 
-        # 3. 조회 대상 선택 (계획 대비 저조 단지 등)
-        underperformers_vs_plan(종료일, min_units=min_units, MAX_M=9, top_n=15)
+    # 3. 조회 대상 선택 (계획 대비 저조 단지 + 막대/산포도 차트)
+    underperformers_vs_plan(종료일, min_units=min_units, MAX_M=9, top_n=15)
 
+    # ── 산포도 차트 하단부터는 '세부내용 분석' 활성화 시에만 표시 ──
+    st.markdown("---")
+    show_detail = st.toggle("🔎 세부내용 분석", value=False, key="detail_analysis_toggle")
+    if show_detail:
         # 4. 연도별 입주시작 단지의 월별 누적 입주율 (그래프, 표)
         plot_yearly_avg_occupancy_with_plan(시작일, 종료일, min_units=min_units)
 
@@ -1349,5 +1346,3 @@ if run:
 
         # 6. 2025년 이후 입주시작 단지 (+활성화 버튼)
         cohort2025_progress(종료일, min_units=min_units, MAX_M=9)
-else:
-    st.info("왼쪽 사이드바에서 옵션을 설정하고 **입주율 분석 실행**을 눌러주세요.")
