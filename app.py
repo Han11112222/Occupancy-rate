@@ -543,7 +543,7 @@ end_raw = pd.to_datetime(end_raw)
 if 시작일 > 종료일:
     시작일, 종료일 = 종료일, 시작일
 
-min_units = top_container.number_input("세대수 하한(세대)", min_value=0, max_value=2000, step=50, value=300)
+min_units = top_container.number_input("세대수 하한(세대)", min_value=0, max_value=2000, step=50, value=200)
 
 
 # -------------------- 분석/시각화 --------------------
