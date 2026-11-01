@@ -1075,10 +1075,17 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
 
     y_labels = [f"{n} ({h}세대) · {m}개월차" for n, h, m in zip(worst["아파트명"], worst["세대수"], worst["경과개월(선택일기준)"])]
 
-    ax.barh(y_labels, worst["계획누적세대(선택일)"], height=0.7, color="#AEC6E0", alpha=1.0, edgecolor="none", label="계획 누적 세대")
-    ax.barh(y_labels, worst["실제누적세대(선택일)"], height=0.35, color="#1B3358", alpha=1.0, label="실제 누적 세대")
+    # 🛠 [버그 수정] '전체 단지 보기'에는 계획값이 없는 단지(경과 10~12개월: PLAN이 1~9개월만 존재)가
+    # 포함되어 계획누적세대가 <NA>(pandas Int64)가 됨 → matplotlib barh가 NAType을 bool로 변환하다 TypeError.
+    # → 그래프용 값은 float(NaN)으로 바꿔 계산하고, 막대는 NaN을 0으로 처리. (표는 그대로 빈칸 표시)
+    plan_s = pd.to_numeric(worst["계획누적세대(선택일)"], errors="coerce").astype("float64")
+    act_s = pd.to_numeric(worst["실제누적세대(선택일)"], errors="coerce").astype("float64")
+    lack_s = pd.to_numeric(worst["현재_부족세대"], errors="coerce").astype("float64")
 
-    x_max = max(worst["계획누적세대(선택일)"].max(skipna=True), worst["실제누적세대(선택일)"].max(skipna=True))
+    ax.barh(y_labels, plan_s.fillna(0).to_numpy(), height=0.7, color="#AEC6E0", alpha=1.0, edgecolor="none", label="계획 누적 세대")
+    ax.barh(y_labels, act_s.fillna(0).to_numpy(), height=0.35, color="#1B3358", alpha=1.0, label="실제 누적 세대")
+
+    x_max = float(np.nanmax([plan_s.max(skipna=True), act_s.max(skipna=True), 1.0]))
 
     ax.set_xlim(0, float(x_max) * 1.35)
     ax.set_xlabel("누적 세대수", fontsize=9)
@@ -1087,23 +1094,26 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     ax.legend(loc="lower right", ncol=2, fontsize=8)
 
     pad_out = max(8, x_max * 0.015)
-    for y, (a, p, lack) in enumerate(zip(
-        worst["실제누적세대(선택일)"].fillna(0),
-        worst["계획누적세대(선택일)"].fillna(0),
-        worst["현재_부족세대"].fillna(0),
-    )):
-        a = int(a); p = int(p); lack = int(lack)
+    for y, (a, p, lack) in enumerate(zip(act_s, plan_s, lack_s)):
+        a = 0 if pd.isna(a) else int(a)
+        lack = 0 if pd.isna(lack) else int(lack)
 
-        if p > a:
-            diff_str = f"부족 {lack:,}"
-        elif a > p:
-            over = a - p
-            diff_str = f"초과 {over:,}"
+        if pd.isna(p):
+            # 계획값이 없는 구간(10~12개월 등)은 비교하지 않고 실적만 표시
+            pos_x = a + pad_out
+            text_str = f"{a:,}세대 (계획 없음)"
         else:
-            diff_str = "계획 달성"
+            p = int(p)
+            if p > a:
+                diff_str = f"부족 {lack:,}"
+            elif a > p:
+                over = a - p
+                diff_str = f"초과 {over:,}"
+            else:
+                diff_str = "계획 달성"
 
-        pos_x = max(a, p) + pad_out
-        text_str = f"{a:,}세대 (계획 {p:,} | {diff_str})"
+            pos_x = max(a, p) + pad_out
+            text_str = f"{a:,}세대 (계획 {p:,} | {diff_str})"
         ax.text(pos_x, y, text_str, va="center", ha="left", fontsize=9, alpha=0.9)
 
     ax.invert_yaxis(); ax.grid(axis="x", alpha=0.3)
