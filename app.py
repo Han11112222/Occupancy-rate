@@ -224,14 +224,18 @@ def _all_xlsx_candidates() -> list:
 
 if load_way == "Repo 내 파일 사용":
     if auto_pick_latest:
-        matches = sorted(glob.glob(pattern))
-        coord_files = [fp for fp in _all_xlsx_candidates() if _has_coords(str(fp), fp.stat().st_mtime)]
-        if matches or coord_files:
-            # 위도/경도가 포함된 파일을 우선, 그 다음 최신 수정시간 순
-            pool = coord_files if coord_files else [Path(m) for m in matches]
-            paths = sorted(pool, key=lambda p: p.stat().st_mtime, reverse=True)
+        # 🛠 [버그 수정] 이전에는 '위도/경도 컬럼이 있는 파일'만 후보(pool)로 삼아서,
+        # 새로 올린 입주율.xlsx(좌표 없음)가 후보에서 빠지고 옛 입주율_위도경도.xlsx가 선택되었음.
+        # → 데이터 본체는 '좌표 전용 파일(파일명에 위도경도 포함)'을 제외하고 선택하고,
+        #   좌표는 아래 _attach_coords_from_repo()가 아파트코드로 보충함.
+        matches = [
+            Path(m) for m in glob.glob(pattern)
+            if not Path(m).name.startswith("~$") and "위도경도" not in Path(m).name
+        ]
+        if matches:
+            paths = sorted(matches, key=lambda p: p.stat().st_mtime, reverse=True)
             selected_path_str = str(paths[0])
-            auto_hint = f"(자동선택: {Path(selected_path_str).name} · 좌표포함 파일 우선)"
+            auto_hint = f"(자동선택: {Path(selected_path_str).name} · 좌표는 별도 파일에서 보충)"
         else:
             selected_path_str = excel_path
             auto_hint = "(패턴 일치 없음 → 수동 경로 사용)"
