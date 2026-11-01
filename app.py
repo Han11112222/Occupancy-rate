@@ -975,10 +975,13 @@ def underperformers_vs_plan(end_date, min_units=0, MAX_M=9, top_n=15):
     PLAN = {1: 9.29, 2: 43.25, 3: 62.75, 4: 72.61, 5: 78.17, 6: 81.56, 7: 84.28, 8: 86.07, 9: 87.86}
     PLAN = {k: min(1.0, v / 100) for k, v in PLAN.items()}
 
-    # 🛠 12개월 초과 시 계획을 100%로 간주 (PLAN 원본은 1~9개월치만 존재)
+    # 🛠 PLAN 원본은 1~9개월치만 존재 → 10~12개월은 9개월 계획값 유지, 13개월 이상은 100%로 간주
+    #    (상단 지도의 _plan_ratio_hold 와 동일 기준)
     def _plan_ratio(m):
         if m in PLAN:
             return PLAN[m]
+        if 9 < m <= 12:
+            return PLAN[9]
         if m > 12:
             return 1.0
         return np.nan
@@ -1154,10 +1157,13 @@ def search_complex(keyword: str, ref_date: pd.Timestamp, MAX_M: int = 9):
     PLAN = {1: 9.29, 2: 43.25, 3: 62.75, 4: 72.61, 5: 78.17, 6: 81.56, 7: 84.28, 8: 86.07, 9: 87.86}
     PLAN = {k: min(1.0, v / 100) for k, v in PLAN.items()}
 
-    # 🛠 12개월 초과 시 계획을 100%로 간주 (PLAN 원본은 1~9개월치만 존재)
+    # 🛠 PLAN 원본은 1~9개월치만 존재 → 10~12개월은 9개월 계획값 유지, 13개월 이상은 100%로 간주
+    #    (상단 지도의 _plan_ratio_hold 와 동일 기준)
     def _plan_ratio(m):
         if m in PLAN:
             return PLAN[m]
+        if 9 < m <= 12:
+            return PLAN[9]
         if m > 12:
             return 1.0
         return np.nan
