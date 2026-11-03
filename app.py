@@ -608,12 +608,24 @@ def show_yearly_cumulative(시작일, 종료일, min_units=0):
 
     st.markdown("#### 📌 연도별 누적 입주율(가중: 총입주세대수 ÷ 총세대수)")
     if not yearly.empty:
+        # 종료일 연도의 '계획 대비 달성률'(누적 실적 ÷ 누적 계획, 계획대비 실적 그래프와 동일 기준)
+        pva_rate = None
+        try:
+            _y, _m, _plan, _act, _coh = _pva_series(종료일, min_units)
+            if _plan is not None and float(np.sum(_plan)) > 0:
+                pva_rate = float(np.sum(_act)) / float(np.sum(_plan)) * 100
+        except Exception:
+            pva_rate = None
+
         cols = st.columns(len(yearly))
         for col, (_, row) in zip(cols, yearly.iterrows()):
+            delta_txt = f"{int(row['총입주세대수']):,} / {int(row['총세대수']):,}"
+            if pva_rate is not None and int(row['입주시작연도']) == 종료일.year:
+                delta_txt += f" (달성률 {pva_rate:.1f}%)"
             col.metric(
                 label=f"{int(row['입주시작연도'])}년",
                 value=f"{row['누적입주율']*100:.1f}%",
-                delta=f"{int(row['총입주세대수']):,} / {int(row['총세대수']):,}"
+                delta=delta_txt
             )
     else:
         st.info("조건에 맞는 연도별 데이터가 없어.")
@@ -1291,8 +1303,8 @@ def search_complex(keyword: str, ref_date: pd.Timestamp, MAX_M: int = 9):
     st.pyplot(fig, use_container_width=True)
 
 # -------------------- [신규] 계획 대비 실적 (1월~현재월 꺾은선) --------------------
-def plan_vs_actual_monthly(ref_date, min_units=0):
-    """종료일 연도에 입주를 시작한 단지의 1월~종료일 월 '월별 입주세대' 계획 vs 실적"""
+def _pva_series(ref_date, min_units=0):
+    """(계산 전용) 종료일 연도에 입주를 시작한 단지의 1월~종료일 월 '월별 입주세대' 계획/실적 배열 반환"""
     ref_date = pd.to_datetime(ref_date)
     month_cols = ensure_start_index(df)
     year = ref_date.year
@@ -1306,8 +1318,7 @@ def plan_vs_actual_monthly(ref_date, min_units=0):
     ].copy()
 
     if cohort.empty:
-        st.info(f"⚠️ {year}년에 입주를 시작한 단지(조건 충족)가 없어.")
-        return
+        return year, [], None, None, cohort
 
     months = list(range(1, ref_date.month + 1))
     plan_m = np.zeros(len(months))
@@ -1328,6 +1339,17 @@ def plan_vs_actual_monthly(ref_date, min_units=0):
                 v = r.get(month_cols[pos])
                 act_m[i] += 0 if pd.isna(v) else v
 
+    return year, months, plan_m, act_m, cohort
+
+
+def plan_vs_actual_monthly(ref_date, min_units=0):
+    """1월~종료일 월 '월별 입주세대' 계획 vs 실적 꺾은선 그래프"""
+    ref_date = pd.to_datetime(ref_date)
+    year, months, plan_m, act_m, cohort = _pva_series(ref_date, min_units)
+    if cohort.empty:
+        st.info(f"⚠️ {year}년에 입주를 시작한 단지(조건 충족)가 없어.")
+        return
+
     mode = st.radio("보기 방식", ["월별 입주세대", "누적 입주세대"], horizontal=True, key="pva_mode")
     if mode == "누적 입주세대":
         plan_y, act_y = np.cumsum(plan_m), np.cumsum(act_m)
@@ -1342,6 +1364,9 @@ def plan_vs_actual_monthly(ref_date, min_units=0):
     gap = cur_act - cur_plan
     gap_rate = (cur_act / cur_plan * 100) if cur_plan > 0 else np.nan
     gap_color = "#D93025" if gap < 0 else "#188038"
+    # 마우스 오버 시 보여줄 월별 갭 문구
+    gap_txt = [f"갭 {a - p:+,.0f}세대" + (f" (달성률 {a / p * 100:.1f}%)" if p > 0 else "")
+               for a, p in zip(act_y, plan_y)]
 
     # 📐 그래프 표준 스타일: 부드러운 곡선 / 굵은 파란 실적선+마커+음영 / 주황 점선 계획 / 상단 가로 범례
     fig = go.Figure()
@@ -1350,7 +1375,8 @@ def plan_vs_actual_monthly(ref_date, min_units=0):
         line=dict(color="#1A73E8", width=4, shape="spline", smoothing=0.8),
         marker=dict(size=8, color="#1A73E8"),
         fill="tozeroy", fillcolor="rgba(26,115,232,0.08)",
-        hovertemplate="%{y:,.0f}세대"))
+        customdata=gap_txt,
+        hovertemplate="%{y:,.0f}세대<br>%{customdata}"))
     fig.add_trace(go.Scatter(
         x=xs, y=plan_y, mode="lines", name=f"{year}년 계획",
         line=dict(color="#F4A300", width=3, dash="dot", shape="spline", smoothing=0.8),
@@ -1360,12 +1386,6 @@ def plan_vs_actual_monthly(ref_date, min_units=0):
         x=[xs[-1], xs[-1]], y=[cur_act, cur_plan], mode="lines+markers", showlegend=False,
         line=dict(color=gap_color, width=2), marker=dict(size=6, color=gap_color),
         hoverinfo="skip"))
-    _rate_txt = "" if pd.isna(gap_rate) else f"<br>달성률 {gap_rate:.1f}%"
-    fig.add_annotation(
-        x=xs[-1], y=(cur_act + cur_plan) / 2, xanchor="right", xshift=-12, showarrow=False,
-        text=f"<b>{xs[-1]} 갭 {gap:+,.0f}세대</b>{_rate_txt}",
-        font=dict(size=12, color=gap_color), bgcolor="white",
-        bordercolor=gap_color, borderwidth=1, borderpad=4)
     fig.update_layout(
         hovermode="x unified", height=420,
         margin=dict(l=50, r=20, t=40, b=40),
@@ -1442,8 +1462,8 @@ with st.expander("🔍 공동주택 검색", expanded=True):
 
 # -------------------- [신규] 계획대비 실적 분석 (공동주택 검색 하단 · 지도 상단) --------------------
 if df is not None and not df.empty:
-    if st.toggle("📈 계획대비 실적 분석", value=False, key="plan_vs_actual_toggle"):
-        plan_vs_actual_monthly(종료일, min_units=min_units)
+    st.markdown("#### 📈 계획대비 실적 분석")
+    plan_vs_actual_monthly(종료일, min_units=min_units)
 
 # -------------------- 3) 지도 시각화 --------------------
 if df is not None and not df.empty:
