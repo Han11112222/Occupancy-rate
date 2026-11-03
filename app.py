@@ -620,12 +620,21 @@ def show_yearly_cumulative(시작일, 종료일, min_units=0):
         cols = st.columns(len(yearly))
         for col, (_, row) in zip(cols, yearly.iterrows()):
             delta_txt = f"{int(row['총입주세대수']):,} / {int(row['총세대수']):,}"
+            extra = ""
             if pva_rate is not None and int(row['입주시작연도']) == 종료일.year:
-                delta_txt += f" (달성률 {pva_rate:.1f}%)"
-            col.metric(
-                label=f"{int(row['입주시작연도'])}년",
-                value=f"{row['누적입주율']*100:.1f}%",
-                delta=delta_txt
+                extra = (f' <span style="font-size:1rem;font-weight:600;color:#1A73E8;">'
+                         f'(현재기준 {pva_rate:.1f}%)</span>')
+            # st.metric 은 값이 길면 말줄임(…) 처리되므로, 동일한 모양의 HTML 카드로 표시
+            col.markdown(
+                f"""
+                <div style="line-height:1.3;">
+                  <div style="font-size:14px;opacity:0.8;">{int(row['입주시작연도'])}년</div>
+                  <div style="font-size:2.25rem;white-space:nowrap;">{row['누적입주율']*100:.1f}%{extra}</div>
+                  <span style="display:inline-block;background:rgba(33,195,84,0.1);color:rgb(9,171,59);
+                               border-radius:1rem;padding:2px 8px;font-size:14px;">↑ {delta_txt}</span>
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
     else:
         st.info("조건에 맞는 연도별 데이터가 없어.")
@@ -1381,11 +1390,13 @@ def plan_vs_actual_monthly(ref_date, min_units=0):
         x=xs, y=plan_y, mode="lines", name=f"{year}년 계획",
         line=dict(color="#F4A300", width=3, dash="dot", shape="spline", smoothing=0.8),
         hovertemplate="%{y:,.0f}세대"))
-    # 현재월 갭 표시(실적~계획 사이 연결선 + 라벨)
-    fig.add_trace(go.Scatter(
-        x=[xs[-1], xs[-1]], y=[cur_act, cur_plan], mode="lines+markers", showlegend=False,
-        line=dict(color=gap_color, width=2), marker=dict(size=6, color=gap_color),
-        hoverinfo="skip"))
+    # 누적 보기일 때만: 계획(주황) 곡선 끝 상단에 누적 달성률 표기 (박스/선 없이 텍스트만)
+    if mode == "누적 입주세대" and cur_plan > 0:
+        fig.add_annotation(
+            x=xs[-1], y=cur_plan, xanchor="right", yanchor="bottom", yshift=10, showarrow=False,
+            text=f"<b>누적 달성률 {gap_rate:.1f}%</b>",
+            font=dict(size=13, color="#B26A00"))
+        fig.update_yaxes(range=[0, max(float(np.max(plan_y)), float(np.max(act_y))) * 1.15])
     fig.update_layout(
         hovermode="x unified", height=420,
         margin=dict(l=50, r=20, t=40, b=40),
