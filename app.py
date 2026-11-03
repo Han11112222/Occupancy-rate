@@ -1,6 +1,7 @@
 # app.py  ─ Streamlit (폰트 견고화 / 캐시초기화 / 최신 파일 자동선택 / TTL 캐시 / CSV다운로드
 #                    / 표 숫자 중앙정렬 / 그래프 라벨(현재·계획·부족·초과) / "연도별 → 요약표" 순서로 배치
-#                    / [신규] 최상단: 현재연도 입주 실적/계획 요약 → 지도(입주율 ↔ 계획대비 편차) → 기존 내용)
+#                    / [신규] 최상단: 현재연도 입주 실적/계획 요약 → 지도(입주율 ↔ 계획대비 편차) → 기존 내용
+#                    / [신규] 지도 하단: '계획대비 실적 분석' 토글 → 1월~현재월 계획 vs 실적 꺾은선 그래프)
 import os, logging, warnings, shutil, time, hashlib, io, glob
 from pathlib import Path
 
@@ -1289,6 +1290,84 @@ def search_complex(keyword: str, ref_date: pd.Timestamp, MAX_M: int = 9):
     apply_korean_font(fig)
     st.pyplot(fig, use_container_width=True)
 
+# -------------------- [신규] 계획 대비 실적 (1월~현재월 꺾은선) --------------------
+def plan_vs_actual_monthly(ref_date, min_units=0):
+    """종료일 연도에 입주를 시작한 단지의 1월~종료일 월 '월별 입주세대' 계획 vs 실적"""
+    ref_date = pd.to_datetime(ref_date)
+    month_cols = ensure_start_index(df)
+    year = ref_date.year
+
+    cohort = df[
+        df["입주시작index"].notna()
+        & df["세대수"].notna()
+        & (df["세대수"] >= min_units)
+        & (df["입주시작월"] >= pd.Timestamp(year, 1, 1))
+        & (df["입주시작월"] <= ref_date)
+    ].copy()
+
+    if cohort.empty:
+        st.info(f"⚠️ {year}년에 입주를 시작한 단지(조건 충족)가 없어.")
+        return
+
+    months = list(range(1, ref_date.month + 1))
+    plan_m = np.zeros(len(months))
+    act_m = np.zeros(len(months))
+
+    for _, r in cohort.iterrows():
+        idx = int(r["입주시작index"])
+        units = float(r["세대수"])
+        s = r["입주시작월"]
+        for i, mo in enumerate(months):
+            k = (year - s.year) * 12 + (mo - s.month) + 1   # 입주 k개월차
+            if k < 1:
+                continue
+            prev = _plan_ratio_hold(k - 1) if k > 1 else 0.0
+            plan_m[i] += (_plan_ratio_hold(k) - prev) * units  # 월 계획 = 누적계획 증가분
+            pos = idx + k - 1
+            if pos < len(month_cols):
+                v = r.get(month_cols[pos])
+                act_m[i] += 0 if pd.isna(v) else v
+
+    mode = st.radio("보기 방식", ["월별 입주세대", "누적 입주세대"], horizontal=True, key="pva_mode")
+    if mode == "누적 입주세대":
+        plan_y, act_y = np.cumsum(plan_m), np.cumsum(act_m)
+    else:
+        plan_y, act_y = plan_m, act_m
+
+    xs = [f"{m}월" for m in months]
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=xs, y=plan_y, mode="lines+markers+text", name="계획",
+        line=dict(dash="dash", color="magenta"),
+        text=[f"{v:,.0f}" for v in plan_y], textposition="top center"))
+    fig.add_trace(go.Scatter(
+        x=xs, y=act_y, mode="lines+markers+text", name="실적",
+        line=dict(color="#1B3358", width=3),
+        text=[f"{v:,.0f}" for v in act_y], textposition="bottom center"))
+    fig.update_layout(
+        hovermode="x unified", height=420, margin=dict(l=40, r=40, t=20, b=20),
+        yaxis=dict(title="세대수", tickformat=","), xaxis=dict(title=f"{year}년"),
+        legend=dict(orientation="h", y=1.08))
+    st.plotly_chart(fig, use_container_width=True, key="pva_chart")
+
+    tbl = pd.DataFrame({
+        "월": xs,
+        "계획": np.round(plan_y).astype(int),
+        "실적": np.round(act_y).astype(int),
+    })
+    tbl["차이(실적-계획)"] = tbl["실적"] - tbl["계획"]
+    tbl["달성률"] = [f"{a / p * 100:.1f}%" if p > 0 else "" for a, p in zip(tbl["실적"], tbl["계획"])]
+    with st.expander("📋 세부내용 보기 (월별 표)", expanded=False):
+        st.dataframe(
+            tbl, use_container_width=True, hide_index=True,
+            column_config={
+                "계획": st.column_config.NumberColumn("계획", format="%,d"),
+                "실적": st.column_config.NumberColumn("실적", format="%,d"),
+                "차이(실적-계획)": st.column_config.NumberColumn("차이(실적-계획)", format="%+,d"),
+            })
+    st.caption(f"기준: {year}년 입주시작 {len(cohort)}개 단지(세대수 ≥ {min_units}) · "
+               f"월 계획 = 사업계획 누적 입주율의 월간 증가분 × 세대수")
+
 # -------------------- 실행 --------------------
 col1, col2 = st.columns([1, 15])
 
@@ -1338,7 +1417,9 @@ if df is not None and not df.empty:
     st.markdown("#### 🗺️ 공동주택 위치 지도")
     render_main_map(build_top_map_options(시작일, 종료일, min_units), key="top_map")
 
-
+    # [신규] 지도 좌측 하단 활성화 버튼 → 1월~현재월 계획 vs 실적 꺾은선 그래프
+    if st.toggle("📈 계획대비 실적 분석", value=False, key="plan_vs_actual_toggle"):
+        plan_vs_actual_monthly(종료일, min_units=min_units)
 
 st.markdown("---")
 
