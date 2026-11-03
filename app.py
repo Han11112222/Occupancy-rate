@@ -1335,19 +1335,30 @@ def plan_vs_actual_monthly(ref_date, min_units=0):
         plan_y, act_y = plan_m, act_m
 
     xs = [f"{m}월" for m in months]
+    st.markdown(f"**{year}년 월별 계획 vs 실적 ({mode})**")
+
+    # 📐 그래프 표준 스타일: 부드러운 곡선 / 굵은 파란 실적선+마커+음영 / 주황 점선 계획 / 상단 가로 범례
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=xs, y=plan_y, mode="lines+markers+text", name="계획",
-        line=dict(dash="dash", color="magenta"),
-        text=[f"{v:,.0f}" for v in plan_y], textposition="top center"))
+        x=xs, y=act_y, mode="lines+markers", name=f"{year}년 실적",
+        line=dict(color="#1A73E8", width=4, shape="spline", smoothing=0.8),
+        marker=dict(size=8, color="#1A73E8"),
+        fill="tozeroy", fillcolor="rgba(26,115,232,0.08)",
+        hovertemplate="%{y:,.0f}세대"))
     fig.add_trace(go.Scatter(
-        x=xs, y=act_y, mode="lines+markers+text", name="실적",
-        line=dict(color="#1B3358", width=3),
-        text=[f"{v:,.0f}" for v in act_y], textposition="bottom center"))
+        x=xs, y=plan_y, mode="lines", name=f"{year}년 계획",
+        line=dict(color="#F4A300", width=3, dash="dot", shape="spline", smoothing=0.8),
+        hovertemplate="%{y:,.0f}세대"))
     fig.update_layout(
-        hovermode="x unified", height=420, margin=dict(l=40, r=40, t=20, b=20),
-        yaxis=dict(title="세대수", tickformat=","), xaxis=dict(title=f"{year}년"),
-        legend=dict(orientation="h", y=1.08))
+        hovermode="x unified", height=420,
+        margin=dict(l=50, r=20, t=40, b=40),
+        plot_bgcolor="white",
+        font=dict(size=11, color="#6B7280"),
+        legend=dict(orientation="h", x=1, xanchor="right", y=1.12, yanchor="bottom"),
+        xaxis=dict(title="월", showgrid=False, showline=False, tickfont=dict(size=10)),
+        yaxis=dict(title="입주세대수", tickformat=",", showgrid=True, gridcolor="#E8EAED",
+                   zeroline=False, showline=False, tickfont=dict(size=10)),
+    )
     st.plotly_chart(fig, use_container_width=True, key="pva_chart")
 
     tbl = pd.DataFrame({
