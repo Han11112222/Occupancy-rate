@@ -1337,10 +1337,16 @@ def plan_vs_actual_monthly(ref_date, min_units=0):
     xs = [f"{m}월" for m in months]
     st.markdown(f"**{year}년 월별 계획 vs 실적 ({mode})**")
 
+    # 현재월(마지막 월) 기준 실적/계획 · 갭
+    cur_act, cur_plan = float(act_y[-1]), float(plan_y[-1])
+    gap = cur_act - cur_plan
+    gap_rate = (cur_act / cur_plan * 100) if cur_plan > 0 else np.nan
+    gap_color = "#D93025" if gap < 0 else "#188038"
+
     # 📐 그래프 표준 스타일: 부드러운 곡선 / 굵은 파란 실적선+마커+음영 / 주황 점선 계획 / 상단 가로 범례
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=xs, y=act_y, mode="lines+markers", name=f"{year}년 실적",
+        x=xs, y=act_y, mode="lines+markers", name=f"{year}년 실적 ({cur_act:,.0f}/{cur_plan:,.0f})",
         line=dict(color="#1A73E8", width=4, shape="spline", smoothing=0.8),
         marker=dict(size=8, color="#1A73E8"),
         fill="tozeroy", fillcolor="rgba(26,115,232,0.08)",
@@ -1349,6 +1355,17 @@ def plan_vs_actual_monthly(ref_date, min_units=0):
         x=xs, y=plan_y, mode="lines", name=f"{year}년 계획",
         line=dict(color="#F4A300", width=3, dash="dot", shape="spline", smoothing=0.8),
         hovertemplate="%{y:,.0f}세대"))
+    # 현재월 갭 표시(실적~계획 사이 연결선 + 라벨)
+    fig.add_trace(go.Scatter(
+        x=[xs[-1], xs[-1]], y=[cur_act, cur_plan], mode="lines+markers", showlegend=False,
+        line=dict(color=gap_color, width=2), marker=dict(size=6, color=gap_color),
+        hoverinfo="skip"))
+    _rate_txt = "" if pd.isna(gap_rate) else f"<br>달성률 {gap_rate:.1f}%"
+    fig.add_annotation(
+        x=xs[-1], y=(cur_act + cur_plan) / 2, xanchor="right", xshift=-12, showarrow=False,
+        text=f"<b>{xs[-1]} 갭 {gap:+,.0f}세대</b>{_rate_txt}",
+        font=dict(size=12, color=gap_color), bgcolor="white",
+        bordercolor=gap_color, borderwidth=1, borderpad=4)
     fig.update_layout(
         hovermode="x unified", height=420,
         margin=dict(l=50, r=20, t=40, b=40),
@@ -1423,14 +1440,15 @@ with st.expander("🔍 공동주택 검색", expanded=True):
             st.warning("검색어를 입력해 주세요.")
 # ── 검색 섹션 끝 ──────────────────────────────────────────────────
 
+# -------------------- [신규] 계획대비 실적 분석 (공동주택 검색 하단 · 지도 상단) --------------------
+if df is not None and not df.empty:
+    if st.toggle("📈 계획대비 실적 분석", value=False, key="plan_vs_actual_toggle"):
+        plan_vs_actual_monthly(종료일, min_units=min_units)
+
 # -------------------- 3) 지도 시각화 --------------------
 if df is not None and not df.empty:
     st.markdown("#### 🗺️ 공동주택 위치 지도")
     render_main_map(build_top_map_options(시작일, 종료일, min_units), key="top_map")
-
-    # [신규] 지도 좌측 하단 활성화 버튼 → 1월~현재월 계획 vs 실적 꺾은선 그래프
-    if st.toggle("📈 계획대비 실적 분석", value=False, key="plan_vs_actual_toggle"):
-        plan_vs_actual_monthly(종료일, min_units=min_units)
 
 st.markdown("---")
 
